@@ -70,8 +70,8 @@ func (i *Integration) SendMessageInSession(sessionID, message, contextPrefix str
 	
 	// Prepare the full message
 	fullMessage := message
-	if contextPrefix != "" && session.MessageCount == 0 {
-		// Only inject context prefix on first message
+	if contextPrefix != "" {
+		// Inject context prefix whenever available
 		fullMessage = contextPrefix + "\n\n" + message
 		fmt.Printf("[DEBUG] Message has context prefix (length: %d)\n", len(contextPrefix))
 	}
