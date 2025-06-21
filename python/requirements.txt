@@ -1,0 +1,29 @@
+# Core MLX ecosystem for Apple Silicon (optional for now)
+# mlx>=0.25.0
+# mlx-lm>=0.24.1
+
+# Text embeddings and semantic understanding
+sentence-transformers>=2.3.0
+transformers>=4.40.0
+huggingface-hub>=0.20.0
+
+# Vector storage and similarity search
+chromadb>=0.4.24
+faiss-cpu>=1.7.4
+
+# Data processing
+numpy>=1.24.0
+pandas>=2.0.0
+
+# Communication with Go CLI
+fastapi>=0.104.0
+uvicorn>=0.24.0
+pydantic>=2.5.0
+
+# Utilities
+python-dotenv>=1.0.0
+loguru>=0.7.0
+rich>=13.0.0
+
+# Claude Code SDK for intelligent memory curation
+claude-code-sdk
