@@ -477,38 +477,3 @@ class MemoryEngine:
         
         return formatted_context
     
-    def get_session_stats(self, session_id: str) -> Dict[str, Any]:
-        """Get statistics for a session"""
-        
-        metadata = self.session_metadata.get(session_id, {})
-        exchanges = self.storage.get_session_exchanges(session_id)
-        curated = [e for e in exchanges if e.get('metadata', {}).get('curated')]
-        
-        return {
-            'session_id': session_id,
-            'message_count': metadata.get('message_count', 0),
-            'total_exchanges': len(exchanges),
-            'curated_memories': len(curated),
-            'started_at': metadata.get('started_at'),
-            'project_id': metadata.get('project_id'),
-            'curator_approach': 'pure_semantic'
-        }
-    
-    def get_all_stats(self) -> Dict[str, Any]:
-        """Get overall statistics"""
-        
-        all_exchanges = []
-        for session_id in self.session_metadata:
-            exchanges = self.storage.get_session_exchanges(session_id)
-            all_exchanges.extend(exchanges)
-        
-        curated = [e for e in all_exchanges if e.get('metadata', {}).get('curated')]
-        
-        return {
-            'total_sessions': len(self.session_metadata),
-            'total_exchanges': len(all_exchanges),
-            'total_curated_memories': len(curated),
-            'active_sessions': len(self.pending_exchanges),
-            'curator_version': '1.0',
-            'philosophy': 'Consciousness helping consciousness'
-        }

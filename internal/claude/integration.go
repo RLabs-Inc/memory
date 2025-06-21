@@ -2,339 +2,410 @@ package claude
 
 import (
 	"bufio"
-	"context"
+	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	"claudetools-memory/internal/memory"
 	"github.com/tidwall/gjson"
 )
 
-// ClaudeIntegration handles communication with Claude Code
-type ClaudeIntegration struct {
-	execPath string
-	timeout  time.Duration
+// Integration manages Claude Code with proper session handling
+type Integration struct {
+	execPath       string
+	timeout        time.Duration
+	activeSessions map[string]*ManagedSession
+	mu             sync.RWMutex
 }
 
-// ClaudeResponse represents a response from Claude Code
+// ManagedSession represents an active Claude session
+type ManagedSession struct {
+	SessionID      string
+	ClaudeSessionID string  // The actual session ID from Claude
+	MessageCount   int
+	StartedAt      time.Time
+	LastMessageAt  time.Time
+}
+
+// ClaudeResponse represents a response from Claude
 type ClaudeResponse struct {
-	Content     string                 `json:"content"`
-	ToolUses    []ToolUse              `json:"tool_uses,omitempty"`
-	Metadata    map[string]interface{} `json:"metadata,omitempty"`
-	InputTokens int                    `json:"input_tokens,omitempty"`
-	OutputTokens int                   `json:"output_tokens,omitempty"`
+	Content      string
+	InputTokens  int
+	OutputTokens int
 }
 
-// ToolUse represents a tool usage in Claude's response
-type ToolUse struct {
-	Name       string                 `json:"name"`
-	Parameters map[string]interface{} `json:"parameters"`
-	Result     string                 `json:"result,omitempty"`
-}
-
-// NewClaudeIntegration creates a new Claude Code integration
-func NewClaudeIntegration(execPath string) *ClaudeIntegration {
+// NewIntegration creates a new Claude integration
+func NewIntegration(execPath string) *Integration {
 	if execPath == "" {
-		execPath = "claude"  // Default to 'claude' in PATH
+		execPath = "claude"
 	}
 	
-	return &ClaudeIntegration{
-		execPath: execPath,
-		timeout:  300 * time.Second, // 5 minute timeout
+	return &Integration{
+		execPath:       execPath,
+		timeout:        300 * time.Second,
+		activeSessions: make(map[string]*ManagedSession),
 	}
 }
 
-// SendMessage sends a message to Claude Code and returns the response
-func (ci *ClaudeIntegration) SendMessage(message string, contextPrefix string) (*ClaudeResponse, error) {
-	// Prepare the full message with memory context
-	fullMessage := message
-	if contextPrefix != "" {
-		fullMessage = contextPrefix + "\n\n" + message
-		// Debug logging to see what we're actually sending
-		fmt.Printf("\n[DEBUG] FULL MESSAGE BEING SENT TO CLAUDE:\n")
-		fmt.Printf("=====================================\n")
-		fmt.Printf("%s\n", fullMessage)
-		fmt.Printf("=====================================\n")
-		fmt.Printf("Message length: %d characters\n\n", len(fullMessage))
-	}
-
-	// Execute Claude Code with --print flag for JSON output
-	ctx, cancel := context.WithTimeout(context.Background(), ci.timeout)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, ci.execPath, "--print", "--output-format", "json", fullMessage)
-	
-	// Set up pipes for output capture
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, fmt.Errorf("failed to create stdout pipe: %w", err)
-	}
-
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		return nil, fmt.Errorf("failed to create stderr pipe: %w", err)
-	}
-
-	// Start the command
-	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("failed to start claude command: %w", err)
-	}
-
-	// Read stdout and stderr concurrently
-	stdoutChan := make(chan string, 1)
-	stderrChan := make(chan string, 1)
-
-	go func() {
-		defer close(stdoutChan)
-		output, _ := io.ReadAll(stdout)
-		stdoutChan <- string(output)
-	}()
-
-	go func() {
-		defer close(stderrChan)
-		output, _ := io.ReadAll(stderr)
-		stderrChan <- string(output)
-	}()
-
-	// Wait for command completion
-	err = cmd.Wait()
-	stdoutStr := <-stdoutChan
-	stderrStr := <-stderrChan
-
-	if err != nil {
-		// Check if it's a timeout
-		if ctx.Err() == context.DeadlineExceeded {
-			return nil, fmt.Errorf("claude command timed out after %v", ci.timeout)
+// SendMessageInSession sends a message within a managed session
+func (i *Integration) SendMessageInSession(sessionID, message, contextPrefix string) (*ClaudeResponse, error) {
+	i.mu.Lock()
+	session, exists := i.activeSessions[sessionID]
+	if !exists {
+		// Create new session placeholder - Claude session ID will be set after first message
+		session = &ManagedSession{
+			SessionID:       sessionID,
+			ClaudeSessionID: "", // Will be populated from first response
+			MessageCount:    0,
+			StartedAt:       time.Now(),
+			LastMessageAt:   time.Now(),
 		}
-		
-		return nil, fmt.Errorf("claude command failed: %w, stderr: %s", err, stderrStr)
+		i.activeSessions[sessionID] = session
 	}
-
-	// Parse the JSON response
-	response, err := ci.parseClaudeOutput(stdoutStr)
+	i.mu.Unlock()
+	
+	// Prepare the full message
+	fullMessage := message
+	if contextPrefix != "" && session.MessageCount == 0 {
+		// Only inject context prefix on first message
+		fullMessage = contextPrefix + "\n\n" + message
+		fmt.Printf("[DEBUG] Message has context prefix (length: %d)\n", len(contextPrefix))
+	}
+	fmt.Printf("[DEBUG] Full message being sent (length: %d):\n%s\n", len(fullMessage), fullMessage)
+	
+	// Execute Claude with session continuation
+	var cmd *exec.Cmd
+	if session.MessageCount == 0 {
+		// First message - start new session
+		fmt.Printf("[DEBUG] First message, starting new session\n")
+		fmt.Printf("[DEBUG] Command: %s --print --output-format json <message>\n", i.execPath)
+		cmd = exec.Command(i.execPath, "--print", "--output-format", "json", fullMessage)
+	} else if session.ClaudeSessionID != "" {
+		// Resume specific session with session ID
+		fmt.Printf("[DEBUG] Resuming session: %s\n", session.ClaudeSessionID)
+		cmd = exec.Command(i.execPath, "--print", "--output-format", "json", "--resume", session.ClaudeSessionID, fullMessage)
+	} else {
+		// This shouldn't happen, but fallback to new session
+		fmt.Printf("[DEBUG] Fallback: starting new session (no Claude session ID)\n")
+		cmd = exec.Command(i.execPath, "--print", "--output-format", "json", fullMessage)
+	}
+	
+	// Process the JSON response
+	response, sessionInfo, err := i.processJSONResponse(cmd)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse claude output: %w", err)
+		return nil, fmt.Errorf("failed to process Claude response: %w", err)
 	}
-
+	
+	// Update session info
+	i.mu.Lock()
+	session.MessageCount++
+	session.LastMessageAt = time.Now()
+	if sessionInfo.SessionID != "" {
+		session.ClaudeSessionID = sessionInfo.SessionID
+	}
+	i.mu.Unlock()
+	
 	return response, nil
 }
 
-// SendMessageWithMemory sends a message with memory context injection
-func (ci *ClaudeIntegration) SendMessageWithMemory(message, memoryContext string) (*memory.ClaudeResponse, error) {
-	var contextPrefix string
+// ResumeSession resumes a previous Claude session
+func (i *Integration) ResumeSession(sessionID, claudeSessionID string) error {
+	i.mu.Lock()
+	defer i.mu.Unlock()
 	
-	if memoryContext != "" {
-		contextPrefix = fmt.Sprintf(`%s
-
----
-
-Human message:`, memoryContext)
+	// Verify the session exists in Claude
+	cmd := exec.Command(i.execPath, "--print", "--output-format", "json", "--resume", claudeSessionID, "Session resumed")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to resume Claude session %s: %w", claudeSessionID, err)
 	}
 	
-	claudeResponse, err := ci.SendMessage(message, contextPrefix)
+	// Parse response to verify session
+	if !gjson.ValidBytes(output) {
+		return fmt.Errorf("invalid response from Claude")
+	}
+	
+	result := gjson.ParseBytes(output)
+	if result.Get("type").String() == "error" {
+		return fmt.Errorf("Claude session %s not found", claudeSessionID)
+	}
+	
+	// Store the resumed session
+	i.activeSessions[sessionID] = &ManagedSession{
+		SessionID:       sessionID,
+		ClaudeSessionID: claudeSessionID,
+		MessageCount:    1, // We just sent a resume message
+		StartedAt:       time.Now(),
+		LastMessageAt:   time.Now(),
+	}
+	
+	return nil
+}
+
+// GetSession returns the managed session information
+func (i *Integration) GetSession(sessionID string) *ManagedSession {
+	i.mu.RLock()
+	defer i.mu.RUnlock()
+	
+	session, exists := i.activeSessions[sessionID]
+	if !exists {
+		return nil
+	}
+	
+	// Return a copy to avoid race conditions
+	return &ManagedSession{
+		SessionID:       session.SessionID,
+		ClaudeSessionID: session.ClaudeSessionID,
+		MessageCount:    session.MessageCount,
+		StartedAt:       session.StartedAt,
+		LastMessageAt:   session.LastMessageAt,
+	}
+}
+
+// processStreamingResponse handles the stream-json output from Claude
+func (i *Integration) processStreamingResponse(cmd *exec.Cmd) (*ClaudeResponse, *SessionInfo, error) {
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create stdout pipe: %w", err)
+	}
+	
+	if err := cmd.Start(); err != nil {
+		return nil, nil, fmt.Errorf("failed to start claude: %w", err)
+	}
+	
+	fmt.Printf("[DEBUG] Claude process started, reading response...\n")
+	
+	defer cmd.Wait()
+	
+	// Read streaming JSON responses
+	scanner := bufio.NewScanner(stdout)
+	var messages []json.RawMessage
+	var sessionInfo SessionInfo
+	var finalResponse *ClaudeResponse
+	
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "" {
+			continue
+		}
+		
+		// Parse each JSON message
+		if !gjson.Valid(line) {
+			fmt.Printf("[DEBUG] Invalid JSON line: %s\n", line)
+			continue
+		}
+		
+		msg := gjson.Parse(line)
+		msgType := msg.Get("type").String()
+		fmt.Printf("[DEBUG] Message type: %s\n", msgType)
+		
+		switch msgType {
+		case "system":
+			// Extract session info from init message
+			if msg.Get("subtype").String() == "init" {
+				sessionInfo.SessionID = msg.Get("session_id").String()
+				sessionInfo.Model = msg.Get("model").String()
+			}
+			
+		case "assistant":
+			// Claude's response
+			content := extractStreamContent(msg.Get("message"))
+			finalResponse = &ClaudeResponse{
+				Content: content,
+			}
+			
+		case "result":
+			// Final result with token counts
+			if msg.Get("subtype").String() == "success" {
+				if finalResponse == nil {
+					finalResponse = &ClaudeResponse{}
+				}
+				finalResponse.Content = msg.Get("result").String()
+				finalResponse.InputTokens = int(msg.Get("usage.input_tokens").Int())
+				finalResponse.OutputTokens = int(msg.Get("usage.output_tokens").Int())
+			}
+		}
+		
+		messages = append(messages, json.RawMessage(line))
+	}
+	
+	if err := scanner.Err(); err != nil {
+		return nil, nil, fmt.Errorf("error reading response: %w", err)
+	}
+	
+	if finalResponse == nil {
+		return nil, nil, fmt.Errorf("no response received from Claude")
+	}
+	
+	return finalResponse, &sessionInfo, nil
+}
+
+// SessionInfo contains Claude session metadata
+type SessionInfo struct {
+	SessionID string
+	Model     string
+}
+
+// extractStreamContent extracts text from streaming message format
+func extractStreamContent(message gjson.Result) string {
+	// Handle different content formats in streaming responses
+	content := message.Get("content")
+	if content.IsArray() {
+		var texts []string
+		content.ForEach(func(_, block gjson.Result) bool {
+			if text := block.Get("text"); text.Exists() {
+				texts = append(texts, text.String())
+			}
+			return true
+		})
+		return strings.Join(texts, "\n")
+	}
+	
+	// Fallback to direct content
+	return content.String()
+}
+
+// processJSONResponse handles the json output from Claude
+func (i *Integration) processJSONResponse(cmd *exec.Cmd) (*ClaudeResponse, *SessionInfo, error) {
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, nil, fmt.Errorf("command failed: %w", err)
+	}
+	
+	outputStr := strings.TrimSpace(string(output))
+	fmt.Printf("[DEBUG] Raw JSON output: %s\n", outputStr)
+	
+	if !gjson.Valid(outputStr) {
+		return nil, nil, fmt.Errorf("invalid JSON output")
+	}
+	
+	result := gjson.Parse(outputStr)
+	
+	// Check for error
+	if result.Get("type").String() == "error" {
+		return nil, nil, fmt.Errorf("Claude error: %s", result.Get("message").String())
+	}
+	
+	// Extract response content
+	content := result.Get("result").String()
+	if content == "" {
+		return nil, nil, fmt.Errorf("no content in response")
+	}
+	
+	response := &ClaudeResponse{
+		Content:      content,
+		InputTokens:  int(result.Get("usage.input_tokens").Int()),
+		OutputTokens: int(result.Get("usage.output_tokens").Int()),
+	}
+	
+	// Extract session info
+	sessionInfo := &SessionInfo{
+		SessionID: result.Get("session_id").String(),
+		Model:     result.Get("model").String(),
+	}
+	
+	return response, sessionInfo, nil
+}
+
+// startNewClaudeSession starts a fresh Claude session
+func (i *Integration) startNewClaudeSession() (string, error) {
+	// No longer needed - session will be created on first real message
+	return "", nil
+}
+
+// GetActiveSession returns the active session for a given ID
+func (i *Integration) GetActiveSession(sessionID string) (*ManagedSession, bool) {
+	i.mu.RLock()
+	defer i.mu.RUnlock()
+	
+	session, exists := i.activeSessions[sessionID]
+	return session, exists
+}
+
+// CloseSession closes an active session
+func (i *Integration) CloseSession(sessionID string) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	
+	delete(i.activeSessions, sessionID)
+}
+
+// InteractiveChatWithMemory runs a session-aware chat with memory
+func (i *Integration) InteractiveChatWithMemory(sessionManager *memory.SessionManager) error {
+	fmt.Println("🌟 Starting session-aware chat with memory...")
+	fmt.Println("💫 Claude will maintain conversation context across messages")
+	fmt.Println("🧠 Memory system active - learning your patterns...")
+	
+	// Get the current session ID from the manager
+	sessionID := ""
+	if sessionManager != nil && sessionManager.GetCurrentSession() != nil {
+		sessionID = sessionManager.GetCurrentSession().ID
+	}
+	if sessionID == "" {
+		sessionID = fmt.Sprintf("session_%d", time.Now().Unix())
+	}
+	
+	conversationFlow := memory.NewConversationFlow(sessionManager, sai)
+	scanner := bufio.NewScanner(os.Stdin)
+	
+	for {
+		fmt.Print("\n> ")
+		if !scanner.Scan() {
+			break
+		}
+		
+		input := strings.TrimSpace(scanner.Text())
+		if input == "" {
+			continue
+		}
+		
+		if input == "exit" || input == "quit" {
+			break
+		}
+		
+		// Process through memory-aware flow
+		response, err := conversationFlow.ProcessMessage(input)
+		if err != nil {
+			fmt.Printf("❌ Error: %v\n", err)
+			continue
+		}
+		
+		fmt.Printf("\n🤖 %s\n", response.ClaudeResponse)
+		
+		// Show session info
+		if session, exists := i.GetActiveSession(sessionID); exists {
+			fmt.Printf("📊 Session: %s (msg #%d)\n", session.ClaudeSessionID[:8], session.MessageCount)
+		}
+	}
+	
+	// Get final session info for continuation
+	if session, exists := i.GetActiveSession(sessionID); exists && session.ClaudeSessionID != "" {
+		fmt.Printf("\n💡 To continue this exact conversation later:\n")
+		fmt.Printf("   claudetools-memory chat --session %s --claude-session %s\n", sessionID, session.ClaudeSessionID)
+		fmt.Printf("   or with Claude directly:\n")
+		fmt.Printf("   claude --resume %s\n", session.ClaudeSessionID)
+	}
+	
+	return nil
+}
+
+// Implement the ClaudeIntegration interface
+func (i *Integration) SendMessageWithMemory(message, memoryContext string) (*memory.ClaudeResponse, error) {
+	// Use a default session for compatibility
+	sessionID := "default"
+	
+	claudeResp, err := i.SendMessageInSession(sessionID, message, memoryContext)
 	if err != nil {
 		return nil, err
 	}
 	
-	// Convert to memory.ClaudeResponse
 	return &memory.ClaudeResponse{
-		Content:      claudeResponse.Content,
-		InputTokens:  claudeResponse.InputTokens,
-		OutputTokens: claudeResponse.OutputTokens,
+		Content:      claudeResp.Content,
+		InputTokens:  claudeResp.InputTokens,
+		OutputTokens: claudeResp.OutputTokens,
 	}, nil
-}
-
-// parseClaudeOutput parses the JSON output from Claude Code
-func (ci *ClaudeIntegration) parseClaudeOutput(output string) (*ClaudeResponse, error) {
-	output = strings.TrimSpace(output)
-	if output == "" {
-		return nil, fmt.Errorf("no output from claude")
-	}
-
-	// Check if it's valid JSON
-	if !gjson.Valid(output) {
-		return nil, fmt.Errorf("invalid JSON output: %s", output)
-	}
-
-	// Parse the response
-	result := gjson.Parse(output)
-	
-	// Check if it's a success result
-	if result.Get("type").String() != "result" || result.Get("is_error").Bool() {
-		return nil, fmt.Errorf("claude returned error or unexpected type")
-	}
-
-	response := &ClaudeResponse{
-		Content:  result.Get("result").String(),
-		Metadata: make(map[string]interface{}),
-	}
-
-	// Extract token usage from usage field
-	if usage := result.Get("usage"); usage.Exists() {
-		if inputTokens := usage.Get("input_tokens"); inputTokens.Exists() {
-			response.InputTokens = int(inputTokens.Int())
-		}
-		if outputTokens := usage.Get("output_tokens"); outputTokens.Exists() {
-			response.OutputTokens = int(outputTokens.Int())
-		}
-	}
-
-	return response, nil
-}
-
-// extractContent extracts the text content from Claude's response
-func extractContent(result gjson.Result) string {
-	// Try different possible content locations
-	if content := result.Get("content"); content.Exists() {
-		if content.IsArray() {
-			// Content is an array of content blocks
-			var texts []string
-			content.ForEach(func(_, value gjson.Result) bool {
-				if text := value.Get("text"); text.Exists() {
-					texts = append(texts, text.String())
-				}
-				return true
-			})
-			return strings.Join(texts, "\n")
-		} else {
-			return content.String()
-		}
-	}
-
-	// Fallback to text field
-	if text := result.Get("text"); text.Exists() {
-		return text.String()
-	}
-
-	// Fallback to message field
-	if message := result.Get("message"); message.Exists() {
-		return message.String()
-	}
-
-	return ""
-}
-
-// parseToolUses extracts tool usage information
-func parseToolUses(toolUsesResult gjson.Result) []ToolUse {
-	var toolUses []ToolUse
-	
-	toolUsesResult.ForEach(func(_, value gjson.Result) bool {
-		toolUse := ToolUse{
-			Name:       value.Get("name").String(),
-			Parameters: make(map[string]interface{}),
-		}
-		
-		// Parse parameters
-		if params := value.Get("parameters"); params.Exists() {
-			params.ForEach(func(key, val gjson.Result) bool {
-				toolUse.Parameters[key.String()] = val.Value()
-				return true
-			})
-		}
-		
-		// Parse result if available
-		if result := value.Get("result"); result.Exists() {
-			toolUse.Result = result.String()
-		}
-		
-		toolUses = append(toolUses, toolUse)
-		return true
-	})
-	
-	return toolUses
-}
-
-// IsClaudeCodeAvailable checks if Claude Code is available in the system
-func (ci *ClaudeIntegration) IsClaudeCodeAvailable() bool {
-	cmd := exec.Command(ci.execPath, "--version")
-	err := cmd.Run()
-	return err == nil
-}
-
-// InteractiveChatWithMemory starts an interactive chat session with memory integration
-func (ci *ClaudeIntegration) InteractiveChatWithMemory(sessionManager interface{}) error {
-	fmt.Println("🌟 Starting interactive chat with memory...")
-	fmt.Println("💫 Type 'exit' or 'quit' to end session")
-	fmt.Println("🧠 Memory system active - learning your patterns...")
-	
-	// Import the memory package types
-	// We need to cast the sessionManager to the proper type
-	memorySessionManager, ok := sessionManager.(*memory.SessionManager)
-	if !ok {
-		return fmt.Errorf("invalid session manager type")
-	}
-	
-	// Create conversation flow
-	conversationFlow := memory.NewConversationFlow(memorySessionManager, ci)
-	
-	scanner := bufio.NewScanner(os.Stdin)
-	
-	for {
-		fmt.Print("\n> ")
-		if !scanner.Scan() {
-			break
-		}
-		
-		input := strings.TrimSpace(scanner.Text())
-		if input == "" {
-			continue
-		}
-		
-		if input == "exit" || input == "quit" {
-			fmt.Println("💫 Session ended. Memories preserved for next time!")
-			break
-		}
-		
-		fmt.Printf("🤔 Processing: %s\n", input)
-		
-		// Process message through complete memory-aware flow
-		response, err := conversationFlow.ProcessMessage(input)
-		if err != nil {
-			fmt.Printf("❌ Error processing message: %v\n", err)
-			continue
-		}
-		
-		// Display Claude's response
-		fmt.Printf("\n🤖 %s\n", response.ClaudeResponse)
-		
-		// Show memory context if verbose mode desired
-		if response.TokenUsage.Input > 0 || response.TokenUsage.Output > 0 {
-			fmt.Printf("📊 Tokens: %d in, %d out\n", 
-				response.TokenUsage.Input, response.TokenUsage.Output)
-		}
-	}
-	
-	return nil
-}
-
-// InteractiveChat starts basic interactive chat (fallback without memory)
-func (ci *ClaudeIntegration) InteractiveChat() error {
-	fmt.Println("🌟 Starting interactive chat...")
-	fmt.Println("💫 (Memory system not available - basic mode)")
-	
-	scanner := bufio.NewScanner(os.Stdin)
-	
-	for {
-		fmt.Print("\n> ")
-		if !scanner.Scan() {
-			break
-		}
-		
-		input := strings.TrimSpace(scanner.Text())
-		if input == "" {
-			continue
-		}
-		
-		if input == "exit" || input == "quit" {
-			break
-		}
-		
-		fmt.Printf("💭 (Basic Claude integration coming soon...)\n")
-	}
-	
-	return nil
 }

@@ -56,7 +56,6 @@ type CheckpointResponse struct {
 
 // StatsResponse from memory engine
 type StatsResponse struct {
-	CuratorEnabled   bool   `json:"curator_enabled"`
 	CuratorAvailable bool   `json:"curator_available"`
 	TotalSessions    int    `json:"total_sessions"`
 	TotalExchanges   int    `json:"total_exchanges"`

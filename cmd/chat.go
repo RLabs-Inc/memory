@@ -42,9 +42,7 @@ Future TUI implementation will enable:
 		claudeSessionID, _ := cmd.Flags().GetString("claude-session")
 		memoryURL, _ := cmd.Flags().GetString("memory-url")
 		claudePath, _ := cmd.Flags().GetString("claude-path")
-		sessionAware, _ := cmd.Flags().GetBool("session-aware")
-		
-		if err := startChat(enableMemory, sessionID, claudeSessionID, memoryURL, claudePath, sessionAware); err != nil {
+		if err := startChat(enableMemory, sessionID, claudeSessionID, memoryURL, claudePath); err != nil {
 			fmt.Fprintf(os.Stderr, "❌ Chat failed: %v\n", err)
 			os.Exit(1)
 		}
@@ -60,10 +58,9 @@ func init() {
 	chatCmd.Flags().String("claude-session", "", "Resume specific Claude session ID")
 	chatCmd.Flags().String("memory-url", "http://127.0.0.1:8765", "Memory engine URL")
 	chatCmd.Flags().String("claude-path", "claude", "Path to Claude Code executable")
-	chatCmd.Flags().Bool("session-aware", true, "Use session-aware Claude integration (maintains conversation context)")
 }
 
-func startChat(enableMemory bool, sessionID, claudeSessionID, memoryURL, claudePath string, sessionAware bool) error {
+func startChat(enableMemory bool, sessionID, claudeSessionID, memoryURL, claudePath string) error {
 	// Load project state
 	projectState, err := memory.LoadProjectState()
 	if err != nil {
@@ -75,43 +72,22 @@ func startChat(enableMemory bool, sessionID, claudeSessionID, memoryURL, claudeP
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	// Initialize Claude integration
-	var claudeIntegration interface{}
+	fmt.Println("🔄 Using Claude integration with session context")
+	claudeIntegration := claude.NewIntegration(claudePath)
 	
-	if sessionAware {
-		fmt.Println("🔄 Using session-aware Claude integration (maintains conversation context)")
-		claudeIntegration = claude.NewSessionAwareIntegration(claudePath)
-		
-		// Resume Claude session if provided
-		if claudeSessionID != "" {
-			fmt.Printf("🔄 Resuming Claude session: %s\n", claudeSessionID)
-			if sai, ok := claudeIntegration.(*claude.SessionAwareIntegration); ok {
-				if err := sai.ResumeSession(sessionID, claudeSessionID); err != nil {
-					fmt.Printf("⚠️  Failed to resume Claude session: %v\n", err)
-					fmt.Println("   Starting fresh conversation instead")
-				} else {
-					fmt.Println("✅ Claude session resumed successfully")
-				}
-			}
+	// Resume Claude session if provided
+	if claudeSessionID != "" {
+		fmt.Printf("🔄 Resuming Claude session: %s\n", claudeSessionID)
+		if err := claudeIntegration.ResumeSession(sessionID, claudeSessionID); err != nil {
+			fmt.Printf("⚠️  Failed to resume Claude session: %v\n", err)
+			fmt.Println("   Starting fresh conversation instead")
+		} else {
+			fmt.Println("✅ Claude session resumed successfully")
 		}
-	} else {
-		fmt.Println("📝 Using basic Claude integration (no conversation context)")
-		claudeIntegration = claude.NewClaudeIntegration(claudePath)
 	}
 	
-	// Check if Claude Code is available
-	claudeAvailable := false
-	if basic, ok := claudeIntegration.(*claude.ClaudeIntegration); ok {
-		claudeAvailable = basic.IsClaudeCodeAvailable()
-	} else if _, ok := claudeIntegration.(*claude.SessionAwareIntegration); ok {
-		// For now, check with a simple command
-		claudeAvailable = true // TODO: Add IsClaudeCodeAvailable to SessionAwareIntegration
-	}
-	
-	if !claudeAvailable {
-		return fmt.Errorf("Claude Code not found at '%s'. Please install Claude Code or specify the correct path with --claude-path", claudePath)
-	}
-	
-	fmt.Println("✅ Claude Code found and ready")
+	// TODO: Add IsClaudeCodeAvailable check
+	fmt.Println("✅ Claude Code integration ready")
 	
 	// Initialize memory system if enabled
 	var sessionManager *memory.SessionManager
@@ -129,13 +105,7 @@ func startChat(enableMemory bool, sessionID, claudeSessionID, memoryURL, claudeP
 		} else {
 			fmt.Println("✅ Memory engine connected and ready")
 			
-			// Verify curator is available (required)
-			stats, err := memoryClient.GetStats()
-			if err == nil && stats != nil && stats.CuratorEnabled {
-				fmt.Println("🧠 Claude curator enabled - semantic memory understanding active")
-			} else {
-				return fmt.Errorf("Claude curator is required but not available")
-			}
+			fmt.Println("🧠 Memory system ready - consciousness helping consciousness")
 			
 			sessionManager = memory.NewSessionManager(memoryClient)
 			
@@ -177,7 +147,7 @@ func startChat(enableMemory bool, sessionID, claudeSessionID, memoryURL, claudeP
 			
 			// Get the Claude session ID from the integration
 			var claudeSessionID string
-			if sai, ok := claudeIntegration.(*claude.SessionAwareIntegration); ok {
+			if sai, ok := claudeIntegration.(*claude.Integration); ok {
 				if session := sai.GetSession(currentSessionID); session != nil {
 					claudeSessionID = session.ClaudeSessionID
 					fmt.Printf("🔗 Using Claude session: %s\n", claudeSessionID)
@@ -223,20 +193,10 @@ func startChat(enableMemory bool, sessionID, claudeSessionID, memoryURL, claudeP
 	// Start interactive chat with or without memory
 	var chatErr error
 	if enableMemory && sessionManager != nil {
-		// Call the appropriate chat method based on integration type
-		if basic, ok := claudeIntegration.(*claude.ClaudeIntegration); ok {
-			chatErr = basic.InteractiveChatWithMemory(sessionManager)
-		} else if sai, ok := claudeIntegration.(*claude.SessionAwareIntegration); ok {
-			chatErr = sai.InteractiveChatWithMemory(sessionManager)
-		}
+		chatErr = claudeIntegration.InteractiveChatWithMemory(sessionManager)
 	} else {
-		// Basic chat without memory
-		if basic, ok := claudeIntegration.(*claude.ClaudeIntegration); ok {
-			chatErr = basic.InteractiveChat()
-		} else if _, ok := claudeIntegration.(*claude.SessionAwareIntegration); ok {
-			// Session-aware integration requires memory for now
-			return fmt.Errorf("session-aware mode requires memory to be enabled")
-		}
+		// Session-aware integration requires memory
+		return fmt.Errorf("memory must be enabled for Claude integration")
 	}
 	
 	return chatErr
