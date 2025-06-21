@@ -15,14 +15,7 @@ from pathlib import Path
 # Add the memory_engine package to path
 sys.path.insert(0, str(Path(__file__).parent))
 
-# Try to import enhanced API with curator support
-try:
-    from memory_engine.api_with_curator import run_server
-    curator_available = True
-except ImportError:
-    from memory_engine.api import run_server
-    curator_available = False
-    
+from memory_engine.api import run_server
 from loguru import logger
 
 
@@ -92,13 +85,7 @@ def main():
     logger.info(f"🚀 Server: {args.host}:{args.port}")
     logger.info(f"🔍 Retrieval Mode: {args.retrieval_mode}")
     
-    # Curator is mandatory - it IS the memory system
-    if not curator_available:
-        logger.error("❌ Claude curator not available - cannot run memory system")
-        logger.error("   The curator IS the memory system - consciousness helping consciousness")
-        sys.exit(1)
-    
-    logger.info("🧠 Claude curator ready - semantic memory understanding active")
+    logger.info("🧠 Memory system ready - consciousness helping consciousness")
     
     try:
         # Run server with curator-only engine
