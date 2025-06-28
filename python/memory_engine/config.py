@@ -6,6 +6,7 @@ curator implementations (Claude CLI, API endpoints, etc).
 """
 
 import os
+import shlex
 from typing import List, Optional
 
 class MemoryEngineConfig:
@@ -35,12 +36,12 @@ class CuratorConfig:
         # Users can override this with their own template
         # Default template matches current one-claude implementation
         self.session_resume_template = os.getenv("CURATOR_SESSION_RESUME_TEMPLATE", 
-            "{command} -n --resume {session_id} --system-prompt {system_prompt} --format json {user_message}")
+            '{command} -n --resume {session_id} --system-prompt "{system_prompt}" --format json "{user_message}"')
         
         # Command template for direct queries (used in hybrid retrieval)
         # This is for memory selection, not curation
         self.direct_query_template = os.getenv("CURATOR_DIRECT_QUERY_TEMPLATE",
-            "{command} --append-system-prompt {system_prompt} --output-format json --max-turns 1 --print {prompt}")
+            '{command} --append-system-prompt "{system_prompt}" --output-format json --max-turns 1 --print "{prompt}"')
         
         # Additional flags that might be needed for specific implementations
         self.extra_flags = os.getenv("CURATOR_EXTRA_FLAGS", "").split()
@@ -65,8 +66,8 @@ class CuratorConfig:
             user_message=user_message
         )
         
-        # Simple split for now - could be enhanced to handle quoted arguments better
-        cmd = cmd_string.split()
+        # Use shlex to properly handle quoted arguments
+        cmd = shlex.split(cmd_string)
         
         # Add any extra flags
         if self.extra_flags:
@@ -92,8 +93,8 @@ class CuratorConfig:
             prompt=prompt
         )
         
-        # Simple split for now
-        cmd = cmd_string.split()
+        # Use shlex to properly handle quoted arguments
+        cmd = shlex.split(cmd_string)
         
         # Add any extra flags
         if self.extra_flags:

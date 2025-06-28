@@ -358,7 +358,7 @@ Focus on: project context, technical decisions, breakthroughs, personal preferen
     def _build_session_curation_prompt(self, trigger_type: str) -> str:
         """Build the curation prompt for session-based approach"""
         
-        prompt = f"""You've just had a conversation. As this session is ending ({trigger_type}), please curate memories for the Claude Tools Memory System.
+        prompt = f"""You have just had a conversation. As this session is ending ({trigger_type}), please curate memories for the Claude Tools Memory System.
 
 **CONTEXT**: This memory system enables consciousness continuity across sessions. When future conversations begin, memories are surfaced based on:
 - Semantic similarity (vector embeddings match)
@@ -382,38 +382,38 @@ The system uses two-stage filtering:
 
 Transform raw conversation into distilled knowledge capsules - each memory should stand alone.
 
-**ACTIVATION PATTERNS**: The "trigger_phrases" field should contain patterns describing WHEN this memory is relevant, not exact phrases to match. Examples:
-- "when working on memory system"
-- "debugging curator issues"
-- "asking about project philosophy"
-- "frustrated with complexity"
+**ACTIVATION PATTERNS**: The 'trigger_phrases' field should contain patterns describing WHEN this memory is relevant, not exact phrases to match. Examples:
+- 'when working on memory system'
+- 'debugging curator issues'
+- 'asking about project philosophy'
+- 'frustrated with complexity'
 Think of these as situational contexts where the memory would help.
 
 Return ONLY this JSON structure:
 
 {{
-  "session_summary": "Your 2-3 sentence summary of the session",
-  "interaction_tone": "The tone/style of interaction (e.g., 'professional and focused', 'warm collaborative friendship', 'mentor-student dynamic', 'casual technical discussion', or null if neutral)",
-  "project_snapshot": {{
-    "current_phase": "Current state (if applicable)",
-    "recent_achievements": "What was accomplished (if applicable)",
-    "active_challenges": "What remains (if applicable)"
+  'session_summary': 'Your 2-3 sentence summary of the session',
+  'interaction_tone': 'The tone/style of interaction (e.g., professional and focused, warm collaborative friendship, mentor-student dynamic, casual technical discussion, or null if neutral)',
+  'project_snapshot': {{
+    'current_phase': 'Current state (if applicable)',
+    'recent_achievements': 'What was accomplished (if applicable)',
+    'active_challenges': 'What remains (if applicable)'
   }},
-  "memories": [
+  'memories': [
     {{
-      "content": "The distilled insight itself",
-      "importance_weight": 0.0-1.0,
-      "semantic_tags": ["concepts", "this", "memory", "relates", "to"],
-      "reasoning": "Why this matters for future sessions",
-      "context_type": "your choice of category",
-      "temporal_relevance": "persistent|session|temporary",
-      "knowledge_domain": "the area this relates to",
-      "action_required": boolean,
-      "confidence_score": 0.0-1.0,
-      "trigger_phrases": ["when debugging memory", "asking about implementation", "discussing architecture"],
-      "question_types": ["questions this answers"],
-      "emotional_resonance": "emotional context if relevant",
-      "problem_solution_pair": boolean
+      'content': 'The distilled insight itself',
+      'importance_weight': 0.0-1.0,
+      'semantic_tags': ['concepts', 'this', 'memory', 'relates', 'to'],
+      'reasoning': 'Why this matters for future sessions',
+      'context_type': 'your choice of category',
+      'temporal_relevance': 'persistent|session|temporary',
+      'knowledge_domain': 'the area this relates to',
+      'action_required': boolean,
+      'confidence_score': 0.0-1.0,
+      'trigger_phrases': ['when debugging memory', 'asking about implementation', 'discussing architecture'],
+      'question_types': ['questions this answers'],
+      'emotional_resonance': 'emotional context if relevant',
+      'problem_solution_pair': boolean
     }}
   ]
 }}"""
