@@ -75,3 +75,6 @@ Thumbs.db
 *.db
 *.sqlite
 *.sqlite3
+
+# Vector database files
+memory_vectors/
