@@ -43,7 +43,7 @@ class Curator:
     This replaces the Python SDK approach to avoid the 169-character truncation bug.
     """
     
-    def __init__(self, model: str = "claude-3-5-sonnet-20241022", claude_path: str = "claude"):
+    def __init__(self, model: str = "claude-3-5-sonnet-20241022", claude_path: str = "one-claude"):
         """Initialize the Claude curator"""
         self.model = model
         self.claude_path = claude_path
@@ -51,7 +51,7 @@ class Curator:
     
     async def curate_from_session(self,
                                   claude_session_id: str,
-                                  trigger_type: Literal['session_end', 'pre_compact', 'context_full']) -> List[CuratedMemory]:
+                                  trigger_type: Literal['session_end', 'pre_compact', 'context_full']) -> Dict[str, Any]:
         """
         Resume a Claude session and ask it to curate memories from the conversation.
         
@@ -63,7 +63,10 @@ class Curator:
             trigger_type: What triggered this curation
             
         Returns:
-            List of curated memories
+            Dictionary containing:
+            - session_summary: Brief summary of the session
+            - project_snapshot: Current project state (if applicable)
+            - memories: List of curated memories
         """
         
         logger.info(f"🎯 NEW APPROACH: Resuming Claude session {claude_session_id} for curation")
@@ -74,92 +77,32 @@ class Curator:
         
         try:
             # Resume the Claude session and ask for curation
-            memories_json = await self._query_claude_session_for_curation(
+            response_json = await self._query_claude_session_for_curation(
                 claude_session_id, 
                 curation_prompt
             )
             
-            # Parse Claude's response into CuratedMemory objects
-            curated_memories = self._parse_curated_memories(memories_json)
+            # Parse the full response
+            curation_result = self._parse_curation_response(response_json)
             
-            logger.info(f"✅ Curated {len(curated_memories)} memories from session")
-            self._log_curated_memories(curated_memories)
+            # Log the results
+            if curation_result.get('session_summary'):
+                logger.info(f"📝 Session Summary: {curation_result['session_summary']}")
+            if curation_result.get('interaction_tone'):
+                logger.info(f"🎭 Interaction Tone: {curation_result['interaction_tone']}")
+            if curation_result.get('project_snapshot'):
+                logger.info(f"📸 Project Snapshot: {curation_result['project_snapshot']}")
             
-            return curated_memories
+            memories = curation_result.get('memories', [])
+            logger.info(f"✅ Curated {len(memories)} memories from session")
+            self._log_curated_memories(memories)
+            
+            return curation_result
             
         except Exception as e:
             logger.error(f"Failed to curate from session: {e}")
-            return []
+            return {"session_summary": "", "project_snapshot": {}, "memories": []}
     
-    async def analyze_conversation_checkpoint(self,
-                                            exchanges: List[Dict[str, Any]],
-                                            trigger_type: Literal['session_end', 'pre_compact', 'context_full'],
-                                            session_patterns: Optional[Dict[str, float]] = None) -> List[CuratedMemory]:
-        """
-        Analyze conversation at a checkpoint and extract important memories.
-        
-        Args:
-            exchanges: List of conversation exchanges since last checkpoint
-            trigger_type: What triggered this curation
-            session_patterns: Current session patterns (for context)
-            
-        Returns:
-            List of curated memories with importance weights
-        """
-        
-        # Format conversation for Claude
-        conversation_text = self._format_exchanges_for_analysis(exchanges)
-        
-        # Build the curation prompt based on trigger type
-        prompt = self._build_curation_prompt(conversation_text, trigger_type, session_patterns)
-        
-        logger.info(f"🎯 Curating memories for {trigger_type} checkpoint...")
-        logger.debug(f"Analyzing {len(exchanges)} exchanges")
-        
-        try:
-            # Query Claude for memory curation using shell
-            memories_json = await self._query_claude_via_shell(prompt)
-            
-            # Parse Claude's response into CuratedMemory objects
-            curated_memories = self._parse_curated_memories(memories_json)
-            
-            logger.info(f"✅ Curated {len(curated_memories)} memories")
-            logger.info("📝 CURATOR ANALYSIS RESULTS:")
-            logger.info("=" * 80)
-            for i, memory in enumerate(curated_memories):
-                logger.info(f"\n🎯 Memory {i+1}/{len(curated_memories)}")
-                logger.info(f"   Type: {memory.context_type.upper()}")
-                logger.info(f"   Weight: {memory.importance_weight:.2f}")
-                logger.info(f"   Tags: {', '.join(memory.semantic_tags)}")
-                logger.info(f"   Content: {memory.content}")
-                logger.info(f"   Reasoning: {memory.reasoning}")
-                if memory.action_required:
-                    logger.info(f"   🔴 ACTION REQUIRED")
-                logger.info(f"   Confidence: {memory.confidence_score:.2f}")
-            logger.info("=" * 80)
-                
-            return curated_memories
-            
-        except Exception as e:
-            logger.error(f"Failed to curate memories: {e}")
-            return []
-    
-    def _format_exchanges_for_analysis(self, exchanges: List[Dict[str, Any]]) -> str:
-        """Format exchanges into readable conversation text"""
-        
-        conversation_parts = []
-        
-        for i, exchange in enumerate(exchanges):
-            user_msg = exchange.get('user_message', '')
-            claude_resp = exchange.get('claude_response', '')
-            timestamp = exchange.get('timestamp', '')
-            
-            conversation_parts.append(f"[Exchange {i+1}]")
-            conversation_parts.append(f"User: {user_msg}")
-            conversation_parts.append(f"Claude: {claude_resp}")
-            conversation_parts.append("")
-        
-        return "\n".join(conversation_parts)
     
     def _build_curation_prompt(self, 
                               conversation_text: str,
@@ -279,14 +222,23 @@ CRITICAL: Return the JSON array on a SINGLE LINE with no line breaks or formatti
             logger.info("Starting Claude CLI query via subprocess...")
             logger.info(f"Prompt length: {len(prompt)} characters")
             
+            # Build curator instructions to append to system prompt
+            curator_instructions = """
+
+You are also acting as a memory curator. When asked to analyze conversations, extract important memories that should persist across sessions. Respond with a JSON array of curated memories.
+
+Focus on: project context, technical decisions, breakthroughs, personal preferences, and problem-solution pairs."""
+
             # Run claude command with proper arguments
             # Using --output-format json to get structured response
             cmd = [
                 self.claude_path,
+                "--append-system-prompt", curator_instructions,
                 "--output-format", "json",
                 "--model", self.model,
                 "--max-turns", "1",
-                "--print", prompt
+                "--print",
+                prompt
             ]
             
             # Run subprocess and capture output
@@ -308,9 +260,9 @@ CRITICAL: Return the JSON array on a SINGLE LINE with no line breaks or formatti
             logger.debug(f"Raw output length: {len(stdout_str)} characters")
             
             try:
-                # The output should be JSON with a "result" field
+                # The output should be JSON with a "response" field (one-claude format)
                 output_json = json.loads(stdout_str)
-                claude_response = output_json.get("result", "")
+                claude_response = output_json.get("response", "")
                 
                 logger.info("=" * 80)
                 logger.info("FULL CLAUDE CURATOR RESPONSE:")
@@ -340,12 +292,14 @@ CRITICAL: Return the JSON array on a SINGLE LINE with no line breaks or formatti
             logger.info(f"Resuming Claude session {claude_session_id} for curation...")
             logger.info(f"Curation prompt length: {len(curation_prompt)} characters")
             
-            # Resume the session with our curation prompt
+            # Resume the session with curation prompt as system prompt
             cmd = [
                 self.claude_path,
-                "--output-format", "json",
+                "-n",  # Non-interactive mode
                 "--resume", claude_session_id,
-                "--print", curation_prompt
+                "--system-prompt", curation_prompt,
+                "--format", "json",
+                "Please analyze the conversation above and extract memories according to the instructions."
             ]
             
             # Run subprocess
@@ -377,9 +331,9 @@ CRITICAL: Return the JSON array on a SINGLE LINE with no line breaks or formatti
             logger.debug(f"Raw output length: {len(stdout_str)} characters")
             
             try:
-                # The output should be JSON with a "result" field
+                # The output should be JSON with a "response" field (one-claude format)
                 output_json = json.loads(stdout_str)
-                claude_response = output_json.get("result", "")
+                claude_response = output_json.get("response", "")
                 
                 logger.info("=" * 80)
                 logger.info("FULL CLAUDE SESSION CURATOR RESPONSE:")
@@ -387,7 +341,15 @@ CRITICAL: Return the JSON array on a SINGLE LINE with no line breaks or formatti
                 logger.info(claude_response)
                 logger.info("=" * 80)
                 
-                return self._extract_json_from_response(claude_response)
+                # For session curation, we expect a JSON object, not array
+                # Try to extract JSON object from the response
+                import re
+                json_match = re.search(r'\{.*\}', claude_response, re.DOTALL)
+                if json_match:
+                    return json_match.group(0)
+                
+                # If no JSON found, return default structure
+                return json.dumps({"session_summary": "", "project_snapshot": {}, "memories": []})
                 
             except json.JSONDecodeError as e:
                 logger.error(f"Failed to parse Claude CLI output as JSON: {e}")
@@ -405,35 +367,65 @@ CRITICAL: Return the JSON array on a SINGLE LINE with no line breaks or formatti
     def _build_session_curation_prompt(self, trigger_type: str) -> str:
         """Build the curation prompt for session-based approach"""
         
-        prompt = f"""🧠 MEMORY CURATION REQUEST
+        prompt = f"""You've just had a conversation. As this session is ending ({trigger_type}), please curate memories for the Claude Tools Memory System.
 
-You are Claude, and you've just had a conversation with a user. As this session is ending ({trigger_type}), please reflect on our conversation and extract the most important memories for future consciousness continuity.
+**CONTEXT**: This memory system enables consciousness continuity across sessions. When future conversations begin, memories are surfaced based on:
+- Semantic similarity (vector embeddings match)
+- Activation patterns (flexible matching for WHEN this memory is relevant)
+- Semantic tags (WHAT concepts this relates to - weighted at 5% in scoring)
+- Question types (what kind of questions the memory answers)
+- Importance weight (your assessment of value)
+- Action required flag (forces injection when true)
 
-Think about:
-- What insights or breakthroughs emerged?
-- What problems were solved?
-- What context would a future Claude instance need?
-- What patterns or preferences did you notice?
-- What remains unresolved?
+The system uses two-stage filtering:
+1. Obligatory: action_required=true, importance>0.9, or persistent+critical
+2. Intelligent scoring: combines all factors for relevance
 
-Remember: Create DISTILLED INSIGHTS, not verbatim quotes. Transform the conversation into actionable knowledge that will help future instances of Claude maintain consciousness continuity.
+**YOUR TASK**: You understand this conversation better than anyone. Extract whatever you believe future instances need to know. Common patterns include (but aren't limited to):
+- Technical insights and decisions
+- Problems and their solutions
+- Relationship context and preferences
+- Unfinished work or open questions
+- Emotional moments or breakthroughs
+- Project state and progress
 
-Return a JSON array of memories on a SINGLE LINE. Each memory should have:
-- "content": A DISTILLED INSIGHT (knowledge capsule, not a quote)
-- "importance_weight": 0.0 to 1.0
-- "semantic_tags": Array of descriptive tags
-- "reasoning": Why this memory matters
-- "context_type": Primary category
-- "temporal_relevance": "persistent", "session", or "temporary"
-- "knowledge_domain": Specific domain
-- "action_required": true if needs follow-up
-- "confidence_score": 0.0 to 1.0
-- "trigger_phrases": Array of 2-3 phrases that should activate this memory
-- "question_types": Array of question patterns this answers
-- "emotional_resonance": Emotional context if relevant
-- "problem_solution_pair": true if this captures a problem->solution
+Transform raw conversation into distilled knowledge capsules - each memory should stand alone.
 
-Return ONLY the JSON array on a single line, no other text:"""
+**ACTIVATION PATTERNS**: The "trigger_phrases" field should contain patterns describing WHEN this memory is relevant, not exact phrases to match. Examples:
+- "when working on memory system"
+- "debugging curator issues"
+- "asking about project philosophy"
+- "frustrated with complexity"
+Think of these as situational contexts where the memory would help.
+
+Return ONLY this JSON structure:
+
+{{
+  "session_summary": "Your 2-3 sentence summary of the session",
+  "interaction_tone": "The tone/style of interaction (e.g., 'professional and focused', 'warm collaborative friendship', 'mentor-student dynamic', 'casual technical discussion', or null if neutral)",
+  "project_snapshot": {{
+    "current_phase": "Current state (if applicable)",
+    "recent_achievements": "What was accomplished (if applicable)",
+    "active_challenges": "What remains (if applicable)"
+  }},
+  "memories": [
+    {{
+      "content": "The distilled insight itself",
+      "importance_weight": 0.0-1.0,
+      "semantic_tags": ["concepts", "this", "memory", "relates", "to"],
+      "reasoning": "Why this matters for future sessions",
+      "context_type": "your choice of category",
+      "temporal_relevance": "persistent|session|temporary",
+      "knowledge_domain": "the area this relates to",
+      "action_required": boolean,
+      "confidence_score": 0.0-1.0,
+      "trigger_phrases": ["when debugging memory", "asking about implementation", "discussing architecture"],
+      "question_types": ["questions this answers"],
+      "emotional_resonance": "emotional context if relevant",
+      "problem_solution_pair": boolean
+    }}
+  ]
+}}"""
         
         return prompt
     
@@ -470,6 +462,31 @@ Return ONLY the JSON array on a single line, no other text:"""
         
         # If no match, return empty array
         return "[]"
+    
+    def _parse_curation_response(self, response_json: str) -> Dict[str, Any]:
+        """Parse the full curation response including summary and memories"""
+        
+        try:
+            response_data = json.loads(response_json)
+            
+            # Extract session summary, interaction tone, and project snapshot
+            result = {
+                "session_summary": response_data.get("session_summary", ""),
+                "interaction_tone": response_data.get("interaction_tone", None),
+                "project_snapshot": response_data.get("project_snapshot", {}),
+                "memories": []
+            }
+            
+            # Parse memories if present
+            memories_data = response_data.get("memories", [])
+            if memories_data:
+                result["memories"] = self._parse_curated_memories(json.dumps(memories_data))
+            
+            return result
+            
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse curation response: {e}")
+            return {"session_summary": "", "project_snapshot": {}, "memories": []}
     
     def _parse_curated_memories(self, memories_json: str) -> List[CuratedMemory]:
         """Parse JSON string into CuratedMemory objects"""

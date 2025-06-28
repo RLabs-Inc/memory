@@ -122,20 +122,37 @@ class SmartVectorRetrieval(RetrievalStrategy):
                 metadata.get('problem_solution_pair', False)
             )
             
-            # Combine scores with ENHANCED weights
-            # Trigger phrases get highest weight as they're explicitly designed for retrieval
-            final_score = (
-                trigger_score * 0.25 +      # Trigger phrases (highest)
-                vector_score * 0.20 +       # Semantic similarity
-                importance * 0.15 +         # Curator's importance
-                question_score * 0.10 +     # Question type match
-                context_score * 0.10 +      # Context alignment
-                temporal_score * 0.05 +     # Time relevance
+            # Get confidence score
+            confidence_score = float(metadata.get('confidence_score', 0.8))
+            
+            # YOUR BRILLIANT RELEVANCE GATEKEEPER SYSTEM!
+            
+            # Calculate relevance score (gatekeeper - max 0.3)
+            relevance_score = (
+                trigger_score * 0.10 +      # Trigger match
+                vector_score * 0.10 +       # Semantic similarity  
                 tag_score * 0.05 +          # Tag matching
-                emotion_score * 0.05 +      # Emotional resonance
-                problem_score * 0.03 +      # Problem-solution
-                action_boost * 0.02         # Action priority
-            )
+                question_score * 0.05       # Question match
+            )  # Max = 0.30
+            
+            # Calculate importance/value score (max 0.7)
+            value_score = (
+                importance * 0.20 +         # Curator's importance
+                temporal_score * 0.10 +     # Time relevance
+                context_score * 0.10 +      # Context alignment
+                confidence_score * 0.10 +   # Confidence
+                emotion_score * 0.10 +      # Emotional resonance
+                problem_score * 0.05 +      # Problem-solution
+                action_boost * 0.05         # Action priority
+            )  # Max = 0.70
+            
+            # Relevance unlocks the full score!
+            final_score = value_score + relevance_score  # Max = 1.0
+            
+            # GATEKEEPER CHECK: Must have minimum relevance AND total score
+            if relevance_score < 0.05 or final_score < 0.3:
+                # Skip this memory - not relevant enough
+                continue
             
             # Add reasoning for why this was selected
             reasoning = self._generate_selection_reasoning(
@@ -148,6 +165,7 @@ class SmartVectorRetrieval(RetrievalStrategy):
                 'memory': memory,
                 'score': final_score,
                 'reasoning': reasoning,
+                'relevance': relevance_score,  # Track relevance separately
                 'components': {
                     'trigger': trigger_score,
                     'vector': vector_score,
@@ -167,6 +185,7 @@ class SmartVectorRetrieval(RetrievalStrategy):
         
         # NEW: Multi-tier selection strategy - like how human memory floods in
         selected = []
+        selected_ids = set()  # Track selected memory IDs across all tiers
         
         # Tier 1: MUST include (trigger phrases, high importance, action required)
         must_include = [m for m in scored_memories if 
@@ -179,6 +198,7 @@ class SmartVectorRetrieval(RetrievalStrategy):
             memory = item['memory'].copy()
             memory['claude_response'] = f"[CRITICAL] {item['reasoning']}"
             selected.append(memory)
+            selected_ids.add(memory['id'])
             scored_memories.remove(item)
         
         # Tier 2: SHOULD include (high scores, diverse perspectives)
@@ -189,6 +209,10 @@ class SmartVectorRetrieval(RetrievalStrategy):
             for item in scored_memories:
                 if len(selected) >= max_memories * 1.5:  # Cap at 150% of requested
                     break
+                
+                # Skip if already selected
+                if item['memory']['id'] in selected_ids:
+                    continue
                     
                 memory_type = item['memory'].get('metadata', {}).get('context_type', 'general')
                 # Include if: high score OR new perspective OR emotional resonance
@@ -199,6 +223,7 @@ class SmartVectorRetrieval(RetrievalStrategy):
                     memory = item['memory'].copy()
                     memory['claude_response'] = item['reasoning']
                     selected.append(memory)
+                    selected_ids.add(memory['id'])
                     types_included.add(memory_type)
         
         # Tier 3: CONTEXT enrichment (related but not directly relevant)
@@ -218,6 +243,10 @@ class SmartVectorRetrieval(RetrievalStrategy):
                 if len(selected) >= max_memories * 2:
                     break
                     
+                # Skip if already selected
+                if item['memory']['id'] in selected_ids:
+                    continue
+                    
                 metadata = item['memory'].get('metadata', {})
                 memory_tags = set(tag.strip() for tag in 
                                 metadata.get('semantic_tags', '').split(',') if tag.strip())
@@ -228,15 +257,18 @@ class SmartVectorRetrieval(RetrievalStrategy):
                     memory = item['memory'].copy()
                     memory['claude_response'] = f"[CONTEXT] {item['reasoning']}"
                     selected.append(memory)
+                    selected_ids.add(memory['id'])  # Track this ID too
+        
+        # Respect the max_memories limit strictly
+        final_selected = selected[:max_memories]
         
         # Log what we're doing
-        logger.info(f"🧠 Smart retrieval selected {len(selected)} memories:")
+        logger.info(f"🧠 Smart retrieval selected {len(final_selected)} memories:")
         logger.info(f"   - Requested: {max_memories}")
         logger.info(f"   - Critical: {len(must_include)}")
-        logger.info(f"   - Total selected: {len(selected)} (up to {max_memories * 2})")
-        logger.info(f"   - Allowing richer context per user preference")
+        logger.info(f"   - Final selected: {len(final_selected)}")
         
-        return selected
+        return final_selected
     
     def _calculate_vector_similarity(self, vec1: List[float], vec2: List[float]) -> float:
         """Calculate cosine similarity between two vectors"""
@@ -314,18 +346,50 @@ class SmartVectorRetrieval(RetrievalStrategy):
         return 0.0
     
     def _score_trigger_phrases(self, message: str, trigger_phrases: str) -> float:
-        """Score based on trigger phrase matching - highest priority"""
+        """Score based on activation patterns - flexible matching for when memory is relevant"""
         if not trigger_phrases:
             return 0.0
         
         message_lower = message.lower()
-        phrases = trigger_phrases.split(',') if isinstance(trigger_phrases, str) else []
+        patterns = trigger_phrases.split(',') if isinstance(trigger_phrases, str) else []
         
-        for phrase in phrases:
-            if phrase.strip().lower() in message_lower:
-                return 1.0  # Perfect match on trigger phrase
+        max_score = 0.0
+        for pattern in patterns:
+            pattern_lower = pattern.strip().lower()
+            
+            # Strategy 1: Key concept matching (individual important words)
+            # Extract key words from pattern (ignore common words)
+            stop_words = {'the', 'is', 'are', 'was', 'were', 'to', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'for', 'with', 'about', 'when', 'how', 'what', 'why'}
+            pattern_words = [w for w in pattern_lower.split() if w not in stop_words and len(w) > 2]
+            
+            if pattern_words:
+                # Check how many key concepts appear (with fuzzy matching for plurals/variations)
+                matches = 0
+                for word in pattern_words:
+                    # Direct match
+                    if word in message_lower:
+                        matches += 1
+                    # Plural/singular variations
+                    elif word.rstrip('s') in message_lower or word + 's' in message_lower:
+                        matches += 0.9
+                    # Substring match for compound words
+                    elif any(word in msg_word for msg_word in message_lower.split()):
+                        matches += 0.7
+                
+                # Score based on percentage of concepts found
+                concept_score = matches / len(pattern_words) if pattern_words else 0
+                
+                # Strategy 2: Contextual pattern matching
+                # If the pattern describes a situation/context, check for indicators
+                if any(indicator in pattern_lower for indicator in ['when', 'during', 'while', 'asking about', 'working on', 'debugging', 'trying to']):
+                    # This is a situational pattern - be more flexible
+                    if any(key_word in message_lower for key_word in pattern_words):
+                        concept_score = max(concept_score, 0.7)  # Boost for situational match
+                
+                max_score = max(max_score, concept_score)
         
-        return 0.0
+        # Return a gradient score instead of all-or-nothing
+        return min(max_score, 1.0)
     
     def _score_question_types(self, message: str, question_types: str) -> float:
         """Score based on question type matching"""

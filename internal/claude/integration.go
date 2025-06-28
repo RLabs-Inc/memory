@@ -308,6 +308,9 @@ func (i *Integration) processJSONResponse(cmd *exec.Cmd) (*ClaudeResponse, *Sess
 		Model:     result.Get("model").String(),
 	}
 	
+	fmt.Printf("[DEBUG] Extracted session ID: %s\n", sessionInfo.SessionID)
+	fmt.Printf("[DEBUG] Full JSON keys: %v\n", result.Map())
+	
 	return response, sessionInfo, nil
 }
 
@@ -349,7 +352,6 @@ func (i *Integration) InteractiveChatWithMemory(sessionManager *memory.SessionMa
 		sessionID = fmt.Sprintf("session_%d", time.Now().Unix())
 	}
 	
-	conversationFlow := memory.NewConversationFlow(sessionManager, sai)
 	scanner := bufio.NewScanner(os.Stdin)
 	
 	for {
@@ -368,13 +370,27 @@ func (i *Integration) InteractiveChatWithMemory(sessionManager *memory.SessionMa
 		}
 		
 		// Process through memory-aware flow
-		response, err := conversationFlow.ProcessMessage(input)
+		// Get memory context first
+		context, err := sessionManager.GetContextForMessage(input)
+		if err != nil {
+			fmt.Printf("❌ Error getting memory context: %v\n", err)
+			continue
+		}
+		
+		// Send message with our known session ID
+		claudeResp, err := i.SendMessageInSession(sessionID, input, context.ContextText)
 		if err != nil {
 			fmt.Printf("❌ Error: %v\n", err)
 			continue
 		}
 		
-		fmt.Printf("\n🤖 %s\n", response.ClaudeResponse)
+		// Store the exchange in memory
+		_, err = sessionManager.ProcessExchange(input, claudeResp.Content)
+		if err != nil {
+			fmt.Printf("❌ Error storing in memory: %v\n", err)
+		}
+		
+		fmt.Printf("\n🤖 %s\n", claudeResp.Content)
 		
 		// Show session info
 		if session, exists := i.GetActiveSession(sessionID); exists {

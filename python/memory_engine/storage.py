@@ -13,21 +13,10 @@ import sqlite3
 import json
 import uuid
 from typing import List, Dict, Optional, Any, Tuple
-from dataclasses import dataclass
 import chromadb
 from chromadb.config import Settings
 from loguru import logger
 
-
-@dataclass
-class StoredExchange:
-    """Represents a stored conversation exchange"""
-    id: str
-    session_id: str
-    user_message: str
-    claude_response: str
-    timestamp: float
-    metadata: Dict[str, Any]
 
 
 class MemoryStorage:
@@ -35,8 +24,8 @@ class MemoryStorage:
     Hybrid storage system for conversation memory.
     
     Architecture:
-    - SQLite: Sessions, exchanges, structured metadata
-    - ChromaDB: Vector embeddings for semantic search
+    - SQLite: Sessions, summaries, snapshots
+    - ChromaDB: Curated memories with embeddings
     - Unified interface for memory operations
     """
     
@@ -60,37 +49,64 @@ class MemoryStorage:
         
         # Create tables
         self.conn.executescript("""
+            CREATE TABLE IF NOT EXISTS projects (
+                id TEXT PRIMARY KEY,
+                created_at REAL NOT NULL,
+                first_session_completed BOOLEAN DEFAULT FALSE,
+                total_sessions INTEGER DEFAULT 0,
+                total_memories INTEGER DEFAULT 0,
+                last_active REAL
+            );
+            
             CREATE TABLE IF NOT EXISTS sessions (
                 id TEXT PRIMARY KEY,
+                project_id TEXT,
                 created_at REAL NOT NULL,
                 last_active REAL NOT NULL,
                 message_count INTEGER DEFAULT 0,
-                metadata TEXT DEFAULT '{}'
+                metadata TEXT DEFAULT '{}',
+                FOREIGN KEY (project_id) REFERENCES projects (id)
             );
             
-            CREATE TABLE IF NOT EXISTS exchanges (
+            CREATE TABLE IF NOT EXISTS curated_memories (
                 id TEXT PRIMARY KEY,
                 session_id TEXT NOT NULL,
-                user_message TEXT NOT NULL,
-                claude_response TEXT NOT NULL,
+                project_id TEXT NOT NULL,
+                content TEXT NOT NULL,
+                reasoning TEXT NOT NULL,
                 timestamp REAL NOT NULL,
                 metadata TEXT DEFAULT '{}',
                 FOREIGN KEY (session_id) REFERENCES sessions (id)
             );
             
-            CREATE TABLE IF NOT EXISTS patterns (
+            CREATE TABLE IF NOT EXISTS session_summaries (
                 id TEXT PRIMARY KEY,
                 session_id TEXT NOT NULL,
-                pattern_type TEXT NOT NULL,
-                pattern_data TEXT NOT NULL,
-                confidence REAL NOT NULL,
+                summary TEXT NOT NULL,
+                interaction_tone TEXT,
                 created_at REAL NOT NULL,
+                project_id TEXT,
                 FOREIGN KEY (session_id) REFERENCES sessions (id)
             );
             
-            CREATE INDEX IF NOT EXISTS idx_exchanges_session ON exchanges (session_id);
-            CREATE INDEX IF NOT EXISTS idx_exchanges_timestamp ON exchanges (timestamp);
-            CREATE INDEX IF NOT EXISTS idx_patterns_session ON patterns (session_id);
+            CREATE TABLE IF NOT EXISTS project_snapshots (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                current_phase TEXT,
+                recent_achievements TEXT,
+                active_challenges TEXT,
+                next_steps TEXT,
+                created_at REAL NOT NULL,
+                project_id TEXT,
+                FOREIGN KEY (session_id) REFERENCES sessions (id)
+            );
+            
+            CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions (project_id);
+            CREATE INDEX IF NOT EXISTS idx_memories_session ON curated_memories (session_id);
+            CREATE INDEX IF NOT EXISTS idx_memories_project ON curated_memories (project_id);
+            CREATE INDEX IF NOT EXISTS idx_memories_timestamp ON curated_memories (timestamp);
+            CREATE INDEX IF NOT EXISTS idx_summaries_created ON session_summaries (created_at);
+            CREATE INDEX IF NOT EXISTS idx_snapshots_created ON project_snapshots (created_at);
         """)
         
         self.conn.commit()
@@ -101,79 +117,81 @@ class MemoryStorage:
             # Create ChromaDB client with persistence
             self.chroma_client = chromadb.PersistentClient(path=self.chroma_path)
             
-            # Get or create collections
-            self.user_messages_collection = self.chroma_client.get_or_create_collection(
-                name="user_messages",
-                metadata={"description": "User message embeddings"}
-            )
-            
-            self.claude_responses_collection = self.chroma_client.get_or_create_collection(
-                name="claude_responses", 
-                metadata={"description": "Claude response embeddings"}
-            )
+            # Project collections will be created on demand
+            self.project_collections = {}
             
             logger.info("✅ ChromaDB initialized successfully")
         except Exception as e:
             logger.error(f"Failed to initialize ChromaDB: {e}")
             raise
     
-    def store_exchange(self,
+    def get_collection_for_project(self, project_id: str):
+        """Get or create a ChromaDB collection for a specific project"""
+        if not project_id:
+            raise ValueError("project_id cannot be None or empty")
+            
+        if project_id not in self.project_collections:
+            collection_name = f"memories_{project_id}"
+            self.project_collections[project_id] = self.chroma_client.get_or_create_collection(
+                name=collection_name,
+                metadata={
+                    "description": f"Curated memories for project {project_id}",
+                    "project_id": project_id
+                }
+            )
+            logger.info(f"📁 Created/loaded collection for project: {project_id}")
+        return self.project_collections[project_id]
+    
+    def store_memory(self,
                       session_id: str,
-                      user_message: str,
-                      claude_response: str,
-                      user_embedding: List[float],
-                      response_embedding: List[float],
-                      metadata: Optional[Dict] = None,
-                      timestamp: float = None,
-                      **kwargs) -> str:
+                      project_id: str,
+                      memory_content: str,
+                      memory_reasoning: str,
+                      memory_embedding: List[float],
+                      metadata: Dict[str, Any],
+                      timestamp: float = None) -> str:
         """
-        Store a complete conversation exchange.
+        Store a curated memory.
         
         Args:
             session_id: Session identifier
-            user_message: User's message text
-            claude_response: Claude's response text
-            user_embedding: Embedding vector for user message
-            response_embedding: Embedding vector for Claude response
-            metadata: Additional metadata
-            timestamp: Exchange timestamp
+            memory_content: The memory content (with [CURATED_MEMORY] prefix)
+            memory_reasoning: Why this memory is important
+            memory_embedding: Embedding vector for the memory
+            metadata: Memory metadata from curator
+            timestamp: When memory was created
             
         Returns:
-            Exchange ID
+            Memory ID
         """
         import time
         
-        exchange_id = str(uuid.uuid4())
+        memory_id = str(uuid.uuid4())
         timestamp = timestamp or time.time()
-        metadata = metadata or {}
+        
+        # This method ONLY stores curated memories
+        if not metadata.get('curated'):
+            logger.error("Attempted to store non-curated memory!")
+            raise ValueError("store_memory only accepts curated memories")
         
         try:
-            # Store in SQLite
+            # Store memory in SQLite
             self.conn.execute("""
-                INSERT OR REPLACE INTO sessions 
-                (id, created_at, last_active, message_count, metadata)
-                VALUES (?, 
-                        COALESCE((SELECT created_at FROM sessions WHERE id = ?), ?),
-                        ?,
-                        COALESCE((SELECT message_count FROM sessions WHERE id = ?), 0) + 1,
-                        ?)
-            """, (session_id, session_id, timestamp, timestamp, session_id, json.dumps({})))
-            
-            self.conn.execute("""
-                INSERT INTO exchanges 
-                (id, session_id, user_message, claude_response, timestamp, metadata)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (exchange_id, session_id, user_message, claude_response, 
+                INSERT INTO curated_memories 
+                (id, session_id, project_id, content, reasoning, timestamp, metadata)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (memory_id, session_id, project_id, memory_content, memory_reasoning, 
                   timestamp, json.dumps(metadata)))
             
             self.conn.commit()
             
-            # Store embeddings in ChromaDB
-            # Sanitize metadata for ChromaDB (no None values allowed)
+            # Prepare metadata for ChromaDB
             chroma_metadata = {
-                "exchange_id": exchange_id,
+                "memory_id": memory_id,
                 "session_id": session_id,
-                "timestamp": timestamp
+                "project_id": project_id,
+                "timestamp": timestamp,
+                "reasoning": memory_reasoning  # Store reasoning in metadata
             }
             
             # Add sanitized metadata values
@@ -189,25 +207,26 @@ class MemoryStorage:
                         else:
                             chroma_metadata[key] = str(value)
             
-            self.user_messages_collection.add(
-                embeddings=[user_embedding],
-                documents=[user_message],
+            logger.info(f"🔍 Storing memory in ChromaDB:")
+            logger.info(f"   - Content: {memory_content[:100]}...")
+            logger.info(f"   - Project: {project_id}")
+            logger.info(f"   - Metadata keys: {list(chroma_metadata.keys())}")
+            logger.info(f"   - ID: {memory_id}")
+            
+            # Get project-specific collection
+            collection = self.get_collection_for_project(project_id)
+            collection.add(
+                embeddings=[memory_embedding],
+                documents=[memory_content],
                 metadatas=[chroma_metadata],
-                ids=[f"{exchange_id}_user"]
+                ids=[memory_id]
             )
             
-            self.claude_responses_collection.add(
-                embeddings=[response_embedding],
-                documents=[claude_response],
-                metadatas=[chroma_metadata],
-                ids=[f"{exchange_id}_claude"]
-            )
-            
-            logger.debug(f"Stored exchange {exchange_id} for session {session_id}")
-            return exchange_id
+            logger.info(f"✅ Stored memory {memory_id} for session {session_id}")
+            return memory_id
             
         except Exception as e:
-            logger.error(f"Failed to store exchange: {e}")
+            logger.error(f"Failed to store memory: {e}")
             raise
     
     def get_session_message_count(self, session_id: str) -> int:
@@ -219,144 +238,210 @@ class MemoryStorage:
         row = cursor.fetchone()
         return row['message_count'] if row else 0
     
-    def find_similar_exchanges(self, 
-                              query_embedding: List[float], 
-                              limit: int = 5,
-                              session_id: Optional[str] = None) -> List[Dict[str, Any]]:
-        """
-        Find exchanges similar to the query embedding.
-        
-        Args:
-            query_embedding: Vector to search for
-            limit: Maximum number of results
-            session_id: Optional session filter
+    
+    def get_all_curated_memories(self, project_id: str) -> List[Dict[str, Any]]:
+        """Get all curated memories for a project from ChromaDB"""
+        if not project_id:
+            logger.warning("No project_id provided to get_all_curated_memories")
+            return []
             
-        Returns:
-            List of similar exchanges with metadata
-        """
         try:
-            # Search user messages collection
-            search_kwargs = {
-                "query_embeddings": [query_embedding],
-                "n_results": limit * 2  # Get more for filtering
-            }
+            logger.info(f"🔍 Getting all memories for project {project_id} from ChromaDB...")
             
-            if session_id:
-                search_kwargs["where"] = {"session_id": session_id}
+            # Get project-specific collection
+            collection = self.get_collection_for_project(project_id)
             
-            results = self.user_messages_collection.query(**search_kwargs)
+            # Get ALL memories from this project - they're ALL curated by design!
+            results = collection.get(
+                include=["documents", "metadatas", "embeddings"]
+            )
             
-            # Convert to standardized format
-            similar_exchanges = []
-            if results and results['ids'] and results['ids'][0]:
-                for i, result_id in enumerate(results['ids'][0]):
-                    exchange_id = results['metadatas'][0][i]['exchange_id']
+            logger.info(f"📊 ChromaDB results:")
+            logger.info(f"   - Total memories found: {len(results.get('ids', []))}")
+            
+            memories = []
+            if results and 'ids' in results and len(results['ids']) > 0:
+                logger.info(f"✅ Processing {len(results['ids'])} memories")
+                for i, doc_id in enumerate(results['ids']):
+                    logger.debug(f"   Processing memory {i+1}: {doc_id}")
+                    # ID is now just the exchange_id
+                    exchange_id = doc_id
                     
-                    # Get full exchange data from SQLite
-                    cursor = self.conn.execute("""
-                        SELECT * FROM exchanges WHERE id = ?
-                    """, (exchange_id,))
+                    memory_dict = {
+                        'id': exchange_id,
+                        'session_id': results['metadatas'][i]['session_id'],
+                        'user_message': results['documents'][i],
+                        'claude_response': results['metadatas'][i].get('reasoning', ''),  # Get from metadata
+                        'timestamp': float(results['metadatas'][i].get('timestamp', 0)),
+                        'metadata': results['metadatas'][i],
+                        'embedding': results['embeddings'][i].tolist() if results.get('embeddings') is not None and i < len(results['embeddings']) else None
+                    }
                     
-                    row = cursor.fetchone()
-                    if row:
-                        similar_exchanges.append({
-                            'exchange_id': exchange_id,
-                            'session_id': row['session_id'],
-                            'user_message': row['user_message'],
-                            'claude_response': row['claude_response'],
-                            'timestamp': row['timestamp'],
-                            'metadata': json.loads(row['metadata']),
-                            'similarity_score': 1 - results['distances'][0][i]  # Convert distance to similarity
-                        })
+                    memories.append(memory_dict)
             
-            return similar_exchanges[:limit]
+            # Sort by timestamp descending
+            memories.sort(key=lambda x: x['timestamp'], reverse=True)
+            
+            logger.info(f"✅ Retrieved {len(memories)} curated memories from ChromaDB")
+            for i, mem in enumerate(memories[:3]):  # Log first 3 memories
+                logger.info(f"Memory {i+1}: {mem['user_message'][:100]}...")
+                logger.info(f"  - Session: {mem['session_id']}")
+                logger.info(f"  - Curated: {mem['metadata'].get('curated', 'Unknown')}")
+                logger.info(f"  - Has embedding: {mem.get('embedding') is not None}")
+            return memories
             
         except Exception as e:
-            logger.error(f"Failed to find similar exchanges: {e}")
+            logger.error(f"Failed to get curated memories from ChromaDB: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return []
     
-    def get_session_history(self, 
-                           session_id: str, 
-                           limit: Optional[int] = None) -> List[StoredExchange]:
-        """Get conversation history for a session"""
-        query = """
-            SELECT * FROM exchanges 
-            WHERE session_id = ? 
-            ORDER BY timestamp ASC
-        """
-        params = [session_id]
-        
-        if limit:
-            query += " LIMIT ?"
-            params.append(limit)
-        
-        cursor = self.conn.execute(query, params)
-        rows = cursor.fetchall()
-        
-        return [
-            StoredExchange(
-                id=row['id'],
-                session_id=row['session_id'],
-                user_message=row['user_message'],
-                claude_response=row['claude_response'],
-                timestamp=row['timestamp'],
-                metadata=json.loads(row['metadata'])
-            )
-            for row in rows
-        ]
     
-    def get_all_curated_memories(self) -> List[Dict[str, Any]]:
-        """Get all curated memories across all sessions for consciousness continuity"""
-        query = """
-            SELECT * FROM exchanges 
-            WHERE user_message LIKE '[CURATED_MEMORY]%'
-            ORDER BY timestamp DESC
-        """
+    def store_session_summary(self, session_id: str, summary: str, project_id: str, interaction_tone: Optional[str] = None):
+        """Store session summary in dedicated table"""
+        import time
+        summary_id = str(uuid.uuid4())
         
-        cursor = self.conn.execute(query)
-        rows = cursor.fetchall()
+        self.conn.execute("""
+            INSERT INTO session_summaries (id, session_id, summary, interaction_tone, created_at, project_id)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (summary_id, session_id, summary, interaction_tone, time.time(), project_id))
         
-        memories = []
-        for row in rows:
-            metadata = json.loads(row['metadata'])
-            # Only include if properly marked as curated
-            if metadata.get('curated', False):
-                memories.append({
-                    'id': row['id'],
-                    'session_id': row['session_id'],
-                    'user_message': row['user_message'],
-                    'claude_response': row['claude_response'],
-                    'timestamp': row['timestamp'],
-                    'metadata': metadata
-                })
-        
-        logger.debug(f"Retrieved {len(memories)} curated memories for consciousness continuity")
-        return memories
+        self.conn.commit()
+        logger.debug(f"Stored session summary for {session_id}")
     
-    def get_session_exchanges(self, session_id: str) -> List[Dict[str, Any]]:
-        """Get all exchanges for a specific session (for session stats)"""
-        query = """
-            SELECT * FROM exchanges 
-            WHERE session_id = ? 
-            ORDER BY timestamp ASC
-        """
+    def store_project_snapshot(self, session_id: str, snapshot: Dict[str, Any], project_id: str):
+        """Store project snapshot in dedicated table"""
+        import time
+        snapshot_id = str(uuid.uuid4())
         
-        cursor = self.conn.execute(query, [session_id])
-        rows = cursor.fetchall()
+        self.conn.execute("""
+            INSERT INTO project_snapshots 
+            (id, session_id, current_phase, recent_achievements, active_challenges, next_steps, created_at, project_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            snapshot_id, 
+            session_id,
+            snapshot.get('current_phase', ''),
+            snapshot.get('recent_achievements', ''),
+            snapshot.get('active_challenges', ''),
+            snapshot.get('next_steps', ''),
+            time.time(),
+            project_id
+        ))
         
-        return [
-            {
-                'id': row['id'],
-                'session_id': row['session_id'],
-                'user_message': row['user_message'],
-                'claude_response': row['claude_response'],
-                'timestamp': row['timestamp'],
-                'metadata': json.loads(row['metadata'])
+        self.conn.commit()
+        logger.debug(f"Stored project snapshot for {session_id}")
+    
+    def get_last_session_summary(self, project_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """Get the most recent session summary with interaction tone"""
+        if project_id:
+            query = """
+                SELECT summary, interaction_tone FROM session_summaries 
+                WHERE project_id = ?
+                ORDER BY created_at DESC
+                LIMIT 1
+            """
+            cursor = self.conn.execute(query, (project_id,))
+        else:
+            query = """
+                SELECT summary, interaction_tone FROM session_summaries 
+                ORDER BY created_at DESC
+                LIMIT 1
+            """
+            cursor = self.conn.execute(query)
+        
+        row = cursor.fetchone()
+        
+        if row:
+            return {
+                'summary': row['summary'],
+                'interaction_tone': row['interaction_tone']
             }
-            for row in rows
-        ]
+        return None
     
-    # Pattern methods removed - curator-only approach doesn't use mechanical patterns
+    def get_last_project_snapshot(self, project_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """Get the most recent project snapshot"""
+        if project_id:
+            query = """
+                SELECT current_phase, recent_achievements, active_challenges, next_steps 
+                FROM project_snapshots 
+                WHERE project_id = ?
+                ORDER BY created_at DESC
+                LIMIT 1
+            """
+            cursor = self.conn.execute(query, (project_id,))
+        else:
+            query = """
+                SELECT current_phase, recent_achievements, active_challenges, next_steps 
+                FROM project_snapshots 
+                ORDER BY created_at DESC
+                LIMIT 1
+            """
+            cursor = self.conn.execute(query)
+        
+        row = cursor.fetchone()
+        
+        if row:
+            return {
+                'current_phase': row['current_phase'],
+                'recent_achievements': row['recent_achievements'],
+                'active_challenges': row['active_challenges'],
+                'next_steps': row['next_steps']
+            }
+        return None
+    
+    def ensure_project_exists(self, project_id: str):
+        """Ensure a project exists in the database"""
+        import time
+        
+        # Check if project exists
+        cursor = self.conn.execute("SELECT id FROM projects WHERE id = ?", (project_id,))
+        if not cursor.fetchone():
+            # Create new project
+            self.conn.execute("""
+                INSERT INTO projects (id, created_at, first_session_completed, total_sessions, total_memories, last_active)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (project_id, time.time(), False, 0, 0, time.time()))
+            self.conn.commit()
+            logger.info(f"📁 Created new project: {project_id}")
+    
+    def is_first_session_for_project(self, project_id: str) -> bool:
+        """Check if this is the first session for a project"""
+        cursor = self.conn.execute(
+            "SELECT first_session_completed FROM projects WHERE id = ?", 
+            (project_id,)
+        )
+        row = cursor.fetchone()
+        
+        if not row:
+            # Project doesn't exist yet, so yes it's the first session
+            return True
+        
+        return not row['first_session_completed']
+    
+    def mark_first_session_completed(self, project_id: str):
+        """Mark that the first session has been completed for a project"""
+        import time
+        self.conn.execute("""
+            UPDATE projects 
+            SET first_session_completed = TRUE, last_active = ?
+            WHERE id = ?
+        """, (time.time(), project_id))
+        self.conn.commit()
+        logger.info(f"✅ Marked first session completed for project: {project_id}")
+    
+    def update_project_stats(self, project_id: str, sessions_delta: int = 0, memories_delta: int = 0):
+        """Update project statistics"""
+        import time
+        self.conn.execute("""
+            UPDATE projects 
+            SET total_sessions = total_sessions + ?,
+                total_memories = total_memories + ?,
+                last_active = ?
+            WHERE id = ?
+        """, (sessions_delta, memories_delta, time.time(), project_id))
+        self.conn.commit()
     
     def close(self):
         """Close database connections"""

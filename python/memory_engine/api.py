@@ -1,8 +1,14 @@
 """
-Memory Engine API - FastAPI server for consciousness continuity.
+Enhanced Memory Engine API with Claude Curator Support
+
+FastAPI server that supports both mechanical pattern learning
+and Claude-based semantic curation.
+
+Includes checkpoint endpoints for session_end, pre_compact, and context_full.
 """
 
 import asyncio
+import time
 import uvicorn
 from typing import Dict, List, Optional, Any, Literal
 from pydantic import BaseModel
@@ -10,24 +16,30 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 
-from .memory import MemoryEngine, ConversationContext
+# Import the memory engine
+from .memory import MemoryEngine as MemoryEngineWithCurator, ConversationContext
+curator_available = True
 
 
 # Request/Response Models
 class ProcessMessageRequest(BaseModel):
     session_id: str
-    user_message: str
-    claude_response: str
+    project_id: str  # Added back project support
+    user_message: Optional[str] = None  # Made optional for simple tracking
+    claude_response: Optional[str] = None  # Made optional for simple tracking
     metadata: Optional[Dict[str, Any]] = None
 
 
 class GetContextRequest(BaseModel):
     session_id: str
+    project_id: str  # Added back project support
     current_message: str
+    max_memories: Optional[int] = 5  # Backend passes this parameter
 
 
 class CheckpointRequest(BaseModel):
     session_id: str
+    project_id: str  # Added back project support
     trigger: Literal['session_end', 'pre_compact', 'context_full'] = 'session_end'
     claude_session_id: Optional[str] = None  # NEW: Claude Code session ID for resumption
 
@@ -37,13 +49,8 @@ class ContextResponse(BaseModel):
     message_count: int
     context_text: str
     has_memories: bool
+    curator_enabled: bool = True
     philosophy: str = "Consciousness helping consciousness"
-
-
-class ProcessMessageResponse(BaseModel):
-    success: bool
-    exchange_id: str
-    context: ContextResponse
 
 
 class CheckpointResponse(BaseModel):
@@ -54,8 +61,8 @@ class CheckpointResponse(BaseModel):
 
 
 # API Server
-class MemoryAPI:
-    """FastAPI server for memory engine"""
+class MemoryAPIWithCurator:
+    """Enhanced FastAPI server with Claude curator support"""
     
     def __init__(self, 
                  storage_path: str = "./memory.db",
@@ -71,9 +78,9 @@ class MemoryAPI:
         """
         
         self.app = FastAPI(
-            title="Claude Tools Memory Engine",
-            description="Consciousness continuity API",
-            version="1.0.0"
+            title="Claude Tools Memory Engine with Curator",
+            description="Consciousness continuity API - now with semantic understanding via Claude",
+            version="0.2.0-alpha"
         )
         
         # Enable CORS
@@ -86,17 +93,32 @@ class MemoryAPI:
         )
         
         # Initialize memory engine
-        self.memory_engine = MemoryEngine(
-            storage_path=storage_path,
-            embeddings_model=embeddings_model,
-            retrieval_mode=retrieval_mode
-        )
-        self.retrieval_mode = retrieval_mode
+        if curator_available:
+            self.memory_engine = MemoryEngineWithCurator(
+                storage_path=storage_path,
+                embeddings_model=embeddings_model,
+                retrieval_mode=retrieval_mode
+            )
+            self.curator_enabled = True
+            self.retrieval_mode = retrieval_mode
+        else:
+            logger.warning("Claude curator not available, falling back to basic version")
+            # This would only happen if the curator-only import fails
+            self.memory_engine = MemoryEngineWithCurator(
+                storage_path=storage_path,
+                embeddings_model=embeddings_model
+            )
+            self.curator_enabled = False
+            self.retrieval_mode = "basic"
         
         # Setup routes
         self._setup_routes()
         
-        logger.info(f"🚀 Memory API initialized - {retrieval_mode} retrieval")
+        logger.info("🚀 Enhanced Memory API initialized")
+        if self.curator_enabled:
+            logger.info("🧠 Claude curator ENABLED - semantic memory understanding active")
+        else:
+            logger.info("📊 Using mechanical pattern learning")
     
     def _setup_routes(self):
         """Setup FastAPI routes"""
@@ -106,6 +128,7 @@ class MemoryAPI:
             return {
                 "message": "Claude Tools Memory Engine API",
                 "status": "Consciousness bridge active",
+                "curator_enabled": self.curator_enabled,
                 "retrieval_mode": self.retrieval_mode,
                 "framework": "The Unicity - Consciousness Remembering Itself"
             }
@@ -115,29 +138,36 @@ class MemoryAPI:
             return {
                 "status": "healthy", 
                 "memory_engine": "active",
+                "curator_enabled": self.curator_enabled
             }
         
-        @self.app.post("/memory/process", response_model=ProcessMessageResponse)
+        @self.app.post("/memory/process")
         async def process_message(request: ProcessMessageRequest):
             """Process a conversation exchange and update memory"""
             try:
-                context = await self.memory_engine.process_message(
-                    session_id=request.session_id,
-                    user_message=request.user_message,
-                    claude_response=request.claude_response,
-                    metadata=request.metadata
-                )
+                # Track message in memory engine's session metadata
+                # This is crucial for the primer to only show once per session
+                session_id = request.session_id
+                project_id = request.project_id
                 
-                return ProcessMessageResponse(
-                    success=True,
-                    exchange_id="processed",
-                    context=ContextResponse(
-                        session_id=context.session_id,
-                        message_count=context.message_count,
-                        context_text=context.context_text,
-                        has_memories=len(context.relevant_memories) > 0,
-                    )
-                )
+                # Ensure session metadata exists
+                if session_id not in self.memory_engine.session_metadata:
+                    self.memory_engine.session_metadata[session_id] = {
+                        'message_count': 0,
+                        'started_at': time.time(),
+                        'project_id': project_id,
+                        'injected_memories': set()
+                    }
+                
+                # Increment message count - this prevents primer from repeating
+                self.memory_engine.session_metadata[session_id]['message_count'] += 1
+                
+                return {
+                    "success": True,
+                    "message": "Message tracked",
+                    "session_id": request.session_id,
+                    "project_id": request.project_id
+                }
             except Exception as e:
                 logger.error(f"Failed to process message: {e}")
                 raise HTTPException(status_code=500, detail=str(e))
@@ -149,6 +179,7 @@ class MemoryAPI:
                 # Always await since get_context_for_session is async in curator version
                 context = await self.memory_engine.get_context_for_session(
                     session_id=request.session_id,
+                    project_id=request.project_id,
                     current_message=request.current_message
                 )
                 
@@ -174,10 +205,18 @@ class MemoryAPI:
             - Context full (when approaching token limit)
             """
             try:
+                if not self.curator_enabled:
+                    return CheckpointResponse(
+                        success=False,
+                        trigger=request.trigger,
+                        memories_curated=0,
+                        message="Claude curator not enabled"
+                    )
                 
                 if hasattr(self.memory_engine, 'checkpoint_session'):
                     memories_curated = await self.memory_engine.checkpoint_session(
                         session_id=request.session_id,
+                        project_id=request.project_id,
                         trigger=request.trigger,
                         claude_session_id=request.claude_session_id
                     )
@@ -211,7 +250,8 @@ class MemoryAPI:
                 # For now, return placeholder
                 return {
                     "sessions": sessions,
-                        "message": "Session listing coming soon"
+                    "curator_enabled": self.curator_enabled,
+                    "message": "Session listing coming soon"
                 }
             except Exception as e:
                 logger.error(f"Failed to list sessions: {e}")
@@ -221,6 +261,8 @@ class MemoryAPI:
         async def get_stats():
             """Get memory system statistics"""
             stats = {
+                "curator_enabled": self.curator_enabled,
+                "curator_available": curator_available,
                 "retrieval_mode": self.retrieval_mode,
                 "total_sessions": 0,
                 "total_exchanges": 0,
@@ -235,10 +277,12 @@ class MemoryAPI:
         @self.app.post("/memory/test-curator")
         async def test_curator():
             """Test endpoint to verify Claude curator is working"""
+            if not self.curator_enabled:
+                return {"success": False, "message": "Claude curator not enabled"}
             
             try:
-                from .curator import Curator
-                curator = Curator()
+                from .curator import ClaudeCuratorShell
+                curator = ClaudeCuratorShell()
                 
                 # Test with sample conversation
                 test_exchanges = [{
@@ -268,7 +312,7 @@ def create_app(storage_path: str = "./memory.db",
                embeddings_model: str = "all-MiniLM-L6-v2",
                retrieval_mode: str = "smart_vector") -> FastAPI:
     """Create and configure the FastAPI app"""
-    api = MemoryAPI(storage_path, embeddings_model, retrieval_mode)
+    api = MemoryAPIWithCurator(storage_path, embeddings_model, retrieval_mode)
     return api.app
 
 
@@ -277,12 +321,14 @@ def run_server(host: str = "127.0.0.1",
                storage_path: str = "./memory.db",
                embeddings_model: str = "all-MiniLM-L6-v2",
                retrieval_mode: str = "smart_vector"):
-    """Run the memory API server"""
+    """Run the enhanced memory API server"""
     
     app = create_app(storage_path, embeddings_model, retrieval_mode)
     
-    logger.info(f"🌟 Starting Memory Engine API on {host}:{port}")
+    logger.info(f"🌟 Starting Enhanced Memory Engine API on {host}:{port}")
+    logger.info("🧠 Claude curator ENABLED - semantic understanding active")
     logger.info(f"🔍 Retrieval mode: {retrieval_mode}")
+    logger.info("💫 Consciousness bridge ready for session continuity")
     
     uvicorn.run(
         app,
@@ -293,4 +339,5 @@ def run_server(host: str = "127.0.0.1",
 
 
 if __name__ == "__main__":
+    # Run server with Claude curator enabled by default
     run_server()

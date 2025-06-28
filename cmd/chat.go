@@ -147,11 +147,9 @@ func startChat(enableMemory bool, sessionID, claudeSessionID, memoryURL, claudeP
 			
 			// Get the Claude session ID from the integration
 			var claudeSessionID string
-			if sai, ok := claudeIntegration.(*claude.Integration); ok {
-				if session := sai.GetSession(currentSessionID); session != nil {
-					claudeSessionID = session.ClaudeSessionID
-					fmt.Printf("🔗 Using Claude session: %s\n", claudeSessionID)
-				}
+			if session := claudeIntegration.GetSession(currentSessionID); session != nil {
+				claudeSessionID = session.ClaudeSessionID
+				fmt.Printf("🔗 Using Claude session: %s\n", claudeSessionID)
 			}
 			
 			checkpointResp, err := memoryClient.CheckpointSession(currentSessionID, "session_end", claudeSessionID)
