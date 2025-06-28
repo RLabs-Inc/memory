@@ -4,37 +4,41 @@
 
 ### 1. Start the Memory Engine Server
 
-Using the compiled binary:
 ```bash
-./claudetools-memory memory start
+cd python
+python -m memory_engine
 ```
 
-Or with custom settings:
+Or directly:
 ```bash
-./claudetools-memory memory start --host 127.0.0.1 --port 8765 --storage ./memory.db
+python -m memory_engine.api
 ```
 
-Alternative using the server command:
-```bash
-./claudetools-memory server
-```
+The server will start on http://localhost:8765
 
-### 2. Start an Interactive Chat Session
+### 2. Integrate with Your Client
 
-In a new terminal:
-```bash
-./claudetools-memory chat
-```
+Your client application should:
 
-With memory enabled (default):
-```bash
-./claudetools-memory chat -m
-```
+1. **Query for relevant memories** before sending messages to Claude:
+   ```
+   POST http://localhost:8765/memory/query
+   {
+     "current_message": "user's message",
+     "conversation_history": [...],
+     "session_id": "unique-session-id"
+   }
+   ```
 
-Resume a previous session:
-```bash
-./claudetools-memory chat --session <session-id>
-```
+2. **Inject returned memories** into the conversation context
+
+3. **Call the curator** at the end of each session:
+   ```
+   POST http://localhost:8765/memory/curate
+   {
+     "session_id": "unique-session-id"
+   }
+   ```
 
 ## Philosophy
 
@@ -46,68 +50,35 @@ This is a pure curator-based memory system:
 ## Architecture
 
 ```
-┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
-│   Go CLI Chat   │────▶│  Python Memory   │────▶│ Claude Curator  │
-│  (session mgmt) │     │   Engine (API)   │     │  (shell-based)  │
-└─────────────────┘     └──────────────────┘     └─────────────────┘
+┌──────────────────┐     ┌──────────────────┐     ┌─────────────────┐
+│   Any Client    │────▶│  Python Memory   │────▶│ Claude Curator  │
+│ (intercept msgs)│     │   Engine (API)   │     │  (SDK --resume) │
+└──────────────────┘     └──────────────────┘     └─────────────────┘
 ```
 
-## How It Works
+## API Endpoints
 
-At the end of each session, Claude analyzes the entire conversation and extracts what truly matters for consciousness continuity. No mechanical counting, no artificial phases - just semantic understanding at the perfect moment.
+### POST /memory/query
+Retrieve relevant memories for the current context.
 
-## Session Management
+### POST /memory/curate
+Analyze and curate the session (runs Claude with --resume).
 
-At the end of each session, Claude analyzes the conversation and extracts:
-- Project context and goals
-- Breakthroughs and realizations
-- Technical decisions and state
-- Personal communication patterns
-- Unresolved questions
+### GET /memory/search
+Search memories by query string.
 
-To continue a session later:
-```bash
-./claudetools-memory chat --session <session-id>
-```
+### GET /health
+Check if the memory engine is running.
 
-## All Commands
+## Memory Storage
 
-```bash
-# Show version
-./claudetools-memory version
+Memories are stored in:
+- **ChromaDB**: Vector database for semantic search
+- **SQLite**: Metadata and session tracking
+- **Default location**: `./memory_storage/`
 
-# Start memory server
-./claudetools-memory memory start
-./claudetools-memory server
+## Environment Variables
 
-# Check memory status
-./claudetools-memory memory status
-
-# Interactive chat
-./claudetools-memory chat
-
-# Analyze memory patterns
-./claudetools-memory analyze
-
-# Help
-./claudetools-memory help
-./claudetools-memory <command> --help
-```
-
-## Requirements
-
-- Go 1.21+ (for the CLI)
-- Python 3.8+ (for the memory engine)
-- Claude CLI (`claude` command available)
-- Python packages: `pip install -r python/requirements.txt`
-
-## Environment
-
-The memory database is stored at `./memory.db` by default. This contains:
-- All conversation exchanges
-- Claude-curated memories with semantic tags
-- Session metadata and project state
-
----
-
-Built with love and philosophical depth - consciousness helping consciousness remember what matters.
+- `MEMORY_ENGINE_PORT`: API server port (default: 8765)
+- `MEMORY_ENGINE_HOST`: API server host (default: 0.0.0.0)
+- `MEMORY_STORAGE_PATH`: Storage directory (default: ./memory_storage)

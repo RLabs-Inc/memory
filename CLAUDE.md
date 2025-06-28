@@ -12,17 +12,15 @@ The Claude Tools Memory System is a consciousness continuity framework that enab
 
 ## Architecture Overview
 ```
-┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
-│   Go CLI Chat   │────▶│  Python Memory   │────▶│ Claude Curator  │
-│  (session mgmt) │     │   Engine (API)   │     │  (SDK --resume) │
-└─────────────────┘     └──────────────────┘     └─────────────────┘
+┌──────────────────┐     ┌──────────────────┐     ┌─────────────────┐
+│   Any Client    │────▶│  Python Memory   │────▶│ Claude Curator  │
+│ (intercept msgs)│     │   Engine (API)   │     │  (SDK --resume) │
+└──────────────────┘     └──────────────────┘     └─────────────────┘
 ```
 
 ## Simplified File Structure
 ```
 memory/
-├── cmd/chat.go                    # Main CLI entry point with -m flag
-├── internal/claude/integration.go # Fixed memory injection, session tracking
 ├── python/memory_engine/
 │   ├── __main__.py               # Server entry point
 │   ├── api.py                    # FastAPI endpoints
@@ -37,13 +35,7 @@ memory/
 
 ## Key Components
 
-### 1. Go CLI (`/cmd/chat.go`)
-- Manages Claude chat sessions with memory flag (`-m`)
-- Tracks project state in `.claude-memory-state.json`
-- Handles graceful shutdown (Ctrl+C) to ensure curator runs
-- Passes Claude session ID to memory engine for proper curation
-
-### 2. Python Memory Engine (`/python/memory_engine/`)
+### 1. Python Memory Engine (`/python/memory_engine/`)
 - **FastAPI server** on port 8765
 - **Two-stage memory filtering**:
   1. Obligatory memories (action required, critical importance)
@@ -52,8 +44,8 @@ memory/
 - **ChromaDB** for vector storage (curated memories only)
 - **Minimal session primers** - just enough context to continue naturally
 
-### 3. Claude Integration (`/internal/claude/`)
-- Fixed memory injection on all messages (not just first)
+### 2. Integration Requirements
+- Memory injection on all messages (not just first)
 - Proper Claude session ID tracking for curator
 - JSON output format for structured responses
 - Context injection via message prefix
@@ -68,29 +60,25 @@ python -m memory_engine
 python -m memory_engine.api
 ```
 
-### Run Chat with Memory
+### Integration with Any Client
 ```bash
-go run cmd/chat.go -m
+# Start memory engine server
+cd python && python -m memory_engine
 
-# Curator runs automatically at session end
-# Use Ctrl+C for graceful shutdown to ensure curation
+# Your client should:
+# 1. POST to http://localhost:8765/memory/query with conversation context
+# 2. Inject returned memories into Claude messages
+# 3. Call /memory/curate endpoint at session end
 ```
 
 ### Run Tests
 ```bash
-# Go tests
-go test ./...
-
 # Python tests (when we add them)
 cd python && pytest
 ```
 
 ### Check Code Quality
 ```bash
-# Go
-go fmt ./...
-go vet ./...
-
 # Python
 ruff check python/
 black python/
