@@ -15,7 +15,7 @@ faiss-cpu>=1.7.4
 numpy>=1.24.0
 pandas>=2.0.0
 
-# Communication with Go CLI
+# API Server
 fastapi>=0.104.0
 uvicorn>=0.24.0
 pydantic>=2.5.0
@@ -25,5 +25,7 @@ python-dotenv>=1.0.0
 loguru>=0.7.0
 rich>=13.0.0
 
-# Claude Code SDK for intelligent memory curation
-claude-code-sdk
+# Development (optional)
+pytest>=7.0.0
+black>=23.0.0
+ruff>=0.1.0

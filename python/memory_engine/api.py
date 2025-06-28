@@ -18,6 +18,7 @@ from loguru import logger
 
 # Import the memory engine
 from .memory import MemoryEngine as MemoryEngineWithCurator, ConversationContext
+from .config import memory_config
 curator_available = True
 
 
@@ -67,7 +68,7 @@ class MemoryAPIWithCurator:
     def __init__(self, 
                  storage_path: str = "./memory.db",
                  embeddings_model: str = "all-MiniLM-L6-v2",
-                 retrieval_mode: str = "smart_vector"):
+                 retrieval_mode: Optional[str] = None):
         """
         Initialize the memory API server with curator-only engine
         
@@ -75,6 +76,7 @@ class MemoryAPIWithCurator:
             storage_path: Path to memory database
             embeddings_model: Model for embeddings
             retrieval_mode: Memory retrieval strategy (claude/smart_vector/hybrid)
+                          If None, uses MEMORY_RETRIEVAL_MODE env var (default: smart_vector)
         """
         
         self.app = FastAPI(
@@ -92,6 +94,10 @@ class MemoryAPIWithCurator:
             allow_headers=["*"],
         )
         
+        # Use config default if retrieval_mode not specified
+        if retrieval_mode is None:
+            retrieval_mode = memory_config.retrieval_mode
+            
         # Initialize memory engine
         if curator_available:
             self.memory_engine = MemoryEngineWithCurator(

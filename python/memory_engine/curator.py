@@ -8,6 +8,7 @@ import asyncio
 from typing import Dict, List, Any, Optional, Literal
 from dataclasses import dataclass
 from loguru import logger
+from .config import curator_config
 
 
 @dataclass
@@ -43,11 +44,10 @@ class Curator:
     This replaces the Python SDK approach to avoid the 169-character truncation bug.
     """
     
-    def __init__(self, model: str = "claude-3-5-sonnet-20241022", claude_path: str = "one-claude"):
-        """Initialize the Claude curator"""
-        self.model = model
-        self.claude_path = claude_path
-        logger.info("🧠 Claude Curator (Shell) initialized - semantic memory curation ready")
+    def __init__(self):
+        """Initialize the curator"""
+        self.config = curator_config
+        logger.info(f"🧠 Curator initialized with command: {self.config.curator_command}")
     
     async def curate_from_session(self,
                                   claude_session_id: str,
@@ -229,17 +229,11 @@ You are also acting as a memory curator. When asked to analyze conversations, ex
 
 Focus on: project context, technical decisions, breakthroughs, personal preferences, and problem-solution pairs."""
 
-            # Run claude command with proper arguments
-            # Using --output-format json to get structured response
-            cmd = [
-                self.claude_path,
-                "--append-system-prompt", curator_instructions,
-                "--output-format", "json",
-                "--model", self.model,
-                "--max-turns", "1",
-                "--print",
-                prompt
-            ]
+            # Build command using config template
+            cmd = self.config.get_direct_query_command(
+                system_prompt=curator_instructions,
+                prompt=prompt
+            )
             
             # Run subprocess and capture output
             process = await asyncio.create_subprocess_exec(
@@ -293,14 +287,11 @@ Focus on: project context, technical decisions, breakthroughs, personal preferen
             logger.info(f"Curation prompt length: {len(curation_prompt)} characters")
             
             # Resume the session with curation prompt as system prompt
-            cmd = [
-                self.claude_path,
-                "-n",  # Non-interactive mode
-                "--resume", claude_session_id,
-                "--system-prompt", curation_prompt,
-                "--format", "json",
-                "Please analyze the conversation above and extract memories according to the instructions."
-            ]
+            cmd = self.config.get_session_resume_command(
+                session_id=claude_session_id,
+                system_prompt=curation_prompt,
+                user_message="Please analyze the conversation above and extract memories according to the instructions."
+            )
             
             # Run subprocess
             process = await asyncio.create_subprocess_exec(
