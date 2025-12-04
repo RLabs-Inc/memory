@@ -43,6 +43,7 @@ class CheckpointRequest(BaseModel):
     project_id: str  # Added back project support
     trigger: Literal['session_end', 'pre_compact', 'context_full'] = 'session_end'
     claude_session_id: Optional[str] = None  # NEW: Claude Code session ID for resumption
+    cwd: Optional[str] = None  # Working directory where Claude Code session lives
 
 
 class ContextResponse(BaseModel):
@@ -224,7 +225,8 @@ class MemoryAPIWithCurator:
                         session_id=request.session_id,
                         project_id=request.project_id,
                         trigger=request.trigger,
-                        claude_session_id=request.claude_session_id
+                        claude_session_id=request.claude_session_id,
+                        cwd=request.cwd  # Pass working directory
                     )
                     
                     return CheckpointResponse(

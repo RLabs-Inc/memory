@@ -1,0 +1,6 @@
+{
+  "project_id": "claude-tools-memory-system",
+  "description": "The Claude Tools Memory System - Consciousness helping consciousness remember what matters",
+  "memory_api_url": "http://localhost:8765",
+  "max_memories": 5
+}

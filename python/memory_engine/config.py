@@ -2,12 +2,40 @@
 Configuration for the Memory Engine Curator.
 
 This module provides configuration options for integrating with different
-curator implementations (Claude CLI, API endpoints, etc).
+curator implementations (Claude Code CLI, one-claude, API endpoints, etc).
+
+Default is now Claude Code CLI (claude command).
 """
 
 import os
 import shlex
+from pathlib import Path
 from typing import List, Optional
+
+
+def get_claude_command() -> str:
+    """
+    Get the path to the Claude CLI command.
+    
+    Checks in order:
+    1. CURATOR_COMMAND environment variable (explicit override)
+    2. ~/.claude/local/claude (standard Claude Code installation)
+    3. 'claude' (fallback to PATH)
+    
+    Returns the first one that exists.
+    """
+    # Check for explicit override
+    env_command = os.getenv("CURATOR_COMMAND")
+    if env_command:
+        return env_command
+    
+    # Check standard Claude Code installation path (works for any user)
+    claude_local = Path.home() / ".claude" / "local" / "claude"
+    if claude_local.exists():
+        return str(claude_local)
+    
+    # Fallback to PATH (might find old version, but better than nothing)
+    return "claude"
 
 class MemoryEngineConfig:
     """Configuration for the memory engine."""
@@ -27,21 +55,44 @@ class MemoryEngineConfig:
 class CuratorConfig:
     """Configuration for curator integration."""
     
+    # Pre-defined templates for different CLI implementations
+    # Note: {command} will be replaced with the detected claude path
+    TEMPLATES = {
+        'claude-code': {
+            'session_resume': '{command} --resume {session_id} -p "{user_message}" --append-system-prompt "{system_prompt}" --output-format json',
+            'direct_query': '{command} -p "{prompt}" --append-system-prompt "{system_prompt}" --output-format json --max-turns 1'
+        },
+        'one-claude': {
+            'session_resume': '{command} -n --resume {session_id} --system-prompt "{system_prompt}" --format json "{user_message}"',
+            'direct_query': '{command} --append-system-prompt "{system_prompt}" --output-format json --max-turns 1 --print "{prompt}"'
+        }
+    }
+    
     def __init__(self):
         """Initialize curator configuration from environment or defaults."""
+        # Which CLI implementation to use: "claude-code" (default) or "one-claude"
+        self.cli_type = os.getenv("CURATOR_CLI_TYPE", "claude-code")
+        
+        # Get default template based on CLI type
+        default_template = self.TEMPLATES.get(self.cli_type, self.TEMPLATES['claude-code'])
+        
         # The command to execute for curation
-        self.curator_command = os.getenv("CURATOR_COMMAND", "one-claude")
+        # Uses smart detection: env var > ~/.claude/local/claude > PATH
+        self.curator_command = get_claude_command()
         
         # Command template for session resumption
         # Users can override this with their own template
-        # Default template matches current one-claude implementation
-        self.session_resume_template = os.getenv("CURATOR_SESSION_RESUME_TEMPLATE", 
-            '{command} -n --resume {session_id} --system-prompt "{system_prompt}" --format json "{user_message}"')
+        self.session_resume_template = os.getenv(
+            "CURATOR_SESSION_RESUME_TEMPLATE", 
+            default_template['session_resume']
+        )
         
         # Command template for direct queries (used in hybrid retrieval)
         # This is for memory selection, not curation
-        self.direct_query_template = os.getenv("CURATOR_DIRECT_QUERY_TEMPLATE",
-            '{command} --append-system-prompt "{system_prompt}" --output-format json --max-turns 1 --print "{prompt}"')
+        self.direct_query_template = os.getenv(
+            "CURATOR_DIRECT_QUERY_TEMPLATE",
+            default_template['direct_query']
+        )
         
         # Additional flags that might be needed for specific implementations
         self.extra_flags = os.getenv("CURATOR_EXTRA_FLAGS", "").split()

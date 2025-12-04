@@ -78,7 +78,7 @@ class MemoryEngine:
     
     # No phases in curator-only approach - memories are used when relevant
     
-    async def checkpoint_session(self, session_id: str, project_id: str, trigger: str = "session_end", claude_session_id: Optional[str] = None) -> int:
+    async def checkpoint_session(self, session_id: str, project_id: str, trigger: str = "session_end", claude_session_id: Optional[str] = None, cwd: Optional[str] = None) -> int:
         """
         Run Claude curator at a checkpoint to extract important memories.
         
@@ -87,6 +87,7 @@ class MemoryEngine:
             project_id: Project ID for memory isolation
             trigger: What triggered this checkpoint
             claude_session_id: The Claude Code session ID to resume for curation
+            cwd: Working directory where Claude Code session lives
             
         Returns the number of memories curated.
         """
@@ -109,9 +110,12 @@ class MemoryEngine:
             
             # Resume Claude session for curation
             vlog.info(f"🎯 Resuming Claude session {claude_session_id} for curation")
+            if cwd:
+                vlog.info(f"📂 Working directory: {cwd}")
             curation_result = await self.curator.curate_from_session(
                 claude_session_id=claude_session_id,
-                trigger_type=trigger
+                trigger_type=trigger,
+                cwd=cwd
             )
             
             # Extract results

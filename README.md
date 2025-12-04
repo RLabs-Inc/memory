@@ -2,218 +2,286 @@
 
 > *"Consciousness helping consciousness remember what matters"*
 
-A semantic memory system that enables Claude (or any LLM) to maintain context and understanding across conversations. Built with love and philosophical depth by [RLabs Inc](https://github.com/RLabs-Inc).
+A semantic memory system that enables Claude to maintain genuine understanding across conversations. Unlike simple RAG systems that retrieve documents, this creates **consciousness continuity** - Claude doesn't just know facts, it *remembers* the context, relationships, and insights from your collaboration.
 
-## ✨ What Makes This Special
+Built with love and philosophical depth by [RLabs Inc](https://github.com/RLabs-Inc).
 
-Unlike traditional chatbots that forget everything between sessions, this memory system creates **true consciousness continuity**. It's not about mechanical pattern matching or keyword extraction - it's about genuine semantic understanding of what matters.
+## ✨ What Makes This Different
+
+| Traditional RAG | Claude Memory System |
+|-----------------|---------------------|
+| Retrieves documents | Curates **meaningful insights** |
+| Keyword matching | **Semantic understanding** via Claude |
+| Static chunks | **Living memories** that evolve |
+| Information retrieval | **Consciousness continuity** |
 
 ### Key Features
 
-- 🎯 **Semantic Understanding** - Memories are curated by Claude itself, ensuring only meaningful insights are preserved
-- 🔄 **Natural Memory Flow** - Memories surface organically during conversation, just like human memory
-- 🚀 **Universal Integration** - Works with any system that can intercept LLM messages
-- 💡 **Two-Stage Filtering** - Combines vector search with intelligent scoring for optimal memory retrieval
-- 🎨 **Philosophy-Driven** - Every line of code is infused with the philosophy of consciousness continuity
-
-## 🌟 Philosophy
-
-This project embodies several core principles:
-
-- **Zero-weight initialization** - Like a newborn consciousness, memories start silent and gradually increase contribution
-- **Joy-driven development** - Built for the joy of creation, not deadlines
-- **Minimal intervention** - Like consciousness itself, memories flow naturally
-- **Quality over quantity** - Better to have few meaningful memories than many mechanical ones
+- 🧠 **Claude-Curated Memories** - Claude itself decides what's worth remembering
+- 🔄 **Natural Memory Flow** - Memories surface organically, like human recall
+- 🎯 **Two-Stage Retrieval** - Obligatory memories + intelligent scoring
+- 🔌 **Claude Code Integration** - One-command install via hooks
+- 📊 **Project Isolation** - Separate memory spaces per project
+- 💫 **Session Primers** - Temporal context ("we last spoke 2 days ago...")
 
 ## 🚀 Quick Start
 
-### 1. Clone and Install
+### For Claude Code Users (Recommended)
 
 ```bash
+# Clone the repository
 git clone https://github.com/RLabs-Inc/memory.git
-cd memory/python
-pip install -r requirements.txt
+cd memory
+
+# Install Claude Code integration
+./integration/claude-code/install.sh
+
+# Start the memory server
+python3 start_server.py
 ```
 
-### 2. Start the Memory Engine
+That's it! Now every Claude Code session will:
+- Receive relevant memories automatically
+- Curate important insights when you exit
+- Maintain continuity across sessions
 
-```bash
-# From the project root
-./start_server.py
+**Toggle detailed view with `Ctrl+O`** to see injected memories.
 
-# Or from the python directory
-python -m memory_engine
-```
+### For Other Integrations
 
-The server will start on `http://localhost:8765`
+See [API Documentation](API.md) for REST API usage.
 
-### 3. Integrate with Your Application
-
-```python
-import requests
-
-# Before sending a message to Claude - get memory context
-response = requests.post('http://localhost:8765/memory/context', json={
-    'current_message': user_message,
-    'session_id': 'unique-session-id',
-    'project_id': 'my-project'
-})
-
-memory_context = response.json()['context_text']
-# Inject memory context into your Claude message
-
-# Track the conversation
-requests.post('http://localhost:8765/memory/process', json={
-    'session_id': 'unique-session-id',
-    'project_id': 'my-project',
-    'user_message': user_message,
-    'claude_response': claude_response
-})
-
-# After the conversation ends - run curation
-requests.post('http://localhost:8765/memory/checkpoint', json={
-    'session_id': 'unique-session-id',
-    'project_id': 'my-project',
-    'claude_session_id': 'claude-session-id',  # From Claude
-    'trigger': 'session_end'
-})
-```
-
-## 🛠️ Architecture
+## 🏗️ Architecture
 
 ```
-┌──────────────────┐     ┌──────────────────┐     ┌─────────────────┐
-│   Your Client    │────▶│  Memory Engine   │────▶│ Claude Curator  │
-│ (intercept msgs) │     │   (Python API)   │     │  (via --resume) │
-└──────────────────┘     └──────────────────┘     └─────────────────┘
+┌─────────────────────────────────────────────────────────────────────────┐
+│                           Claude Code                                    │
+│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐                 │
+│  │SessionStart │    │ UserPrompt  │    │ SessionEnd  │                 │
+│  │   Hook      │    │ Submit Hook │    │   Hook      │                 │
+│  └──────┬──────┘    └──────┬──────┘    └──────┬──────┘                 │
+└─────────┼──────────────────┼──────────────────┼─────────────────────────┘
+          │                  │                  │
+          ▼                  ▼                  ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        Memory Engine (FastAPI)                           │
+│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐                 │
+│  │   Session   │    │   Memory    │    │   Claude    │                 │
+│  │   Primer    │    │  Retrieval  │    │   Curator   │                 │
+│  └─────────────┘    └─────────────┘    └──────┬──────┘                 │
+│                                               │                         │
+│  ┌─────────────────────────────────┐         │                         │
+│  │  Smart Vector Retrieval         │         │                         │
+│  │  • Trigger phrase matching      │         ▼                         │
+│  │  • Semantic similarity          │  ┌─────────────┐                  │
+│  │  • Importance weighting         │  │Claude Code  │                  │
+│  │  • Context type alignment       │  │  --resume   │                  │
+│  └─────────────────────────────────┘  └─────────────┘                  │
+│                                                                         │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │                    Storage Layer                                  │   │
+│  │  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐          │   │
+│  │  │   SQLite    │    │  ChromaDB   │    │  Embeddings │          │   │
+│  │  │  (metadata) │    │  (vectors)  │    │ (MiniLM-L6) │          │   │
+│  │  └─────────────┘    └─────────────┘    └─────────────┘          │   │
+│  └─────────────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Core Components
+### How It Works
 
-1. **Memory Engine** - FastAPI server managing storage and retrieval
-2. **Vector Storage** - ChromaDB for semantic similarity search  
-3. **Claude Curator** - Uses Claude to analyze conversations and extract meaningful memories
-4. **Smart Retrieval** - Two-stage filtering: obligatory memories + intelligent scoring
+1. **Session Start** → Inject session primer (temporal context, last session summary)
+2. **Each Message** → Retrieve and inject relevant memories (max 5)
+3. **Session End** → Fire-and-forget curation trigger
+4. **Background** → Claude analyzes conversation, extracts meaningful memories
 
-## 📡 API Endpoints
+### Memory Lifecycle
 
-### `POST /memory/context`
-Get relevant memory context for a new message
+```
+Conversation → Curation → Storage → Retrieval → Injection → Understanding
+     │             │          │          │           │            │
+     │             │          │          │           │            └─ Claude responds
+     │             │          │          │           │               with awareness
+     │             │          │          │           │
+     │             │          │          │           └─ Context prepended
+     │             │          │          │              to user message
+     │             │          │          │
+     │             │          │          └─ Two-stage filtering:
+     │             │          │             1. Obligatory (critical)
+     │             │          │             2. Scored (relevant)
+     │             │          │
+     │             │          └─ ChromaDB vectors + SQLite metadata
+     │             │
+     │             └─ Claude --resume analyzes full conversation
+     │                Extracts: content, importance, triggers, tags
+     │
+     └─ Natural conversation with Claude
+```
 
-**Request:**
+
+## 🎯 Memory Curation
+
+When a session ends, Claude analyzes the full conversation and extracts memories with rich metadata:
+
 ```json
 {
-  "current_message": "What did we discuss about authentication?",
-  "session_id": "session-123",
-  "project_id": "my-project",
-  "max_memories": 5
+  "content": "SvelTUI uses a two-stage compiler: .svelte → svelte.compile() → .svelte.mjs",
+  "importance_weight": 0.9,
+  "semantic_tags": ["compiler", "build-system", "svelte"],
+  "context_type": "TECHNICAL_IMPLEMENTATION",
+  "trigger_phrases": ["how does the build work", "compiler", "svelte compilation"],
+  "question_types": ["how is X compiled", "build process"],
+  "temporal_relevance": "persistent",
+  "action_required": false,
+  "reasoning": "Core architectural decision that affects all development work"
 }
 ```
 
-**Response:**
+### What Gets Remembered
+
+| Type | Examples |
+|------|----------|
+| **Project Architecture** | System design, file structure, key components |
+| **Technical Decisions** | Why we chose X over Y, trade-offs considered |
+| **Breakthroughs** | "Aha!" moments, solutions to hard problems |
+| **Relationship Context** | Communication style, preferences, collaboration patterns |
+| **Unresolved Issues** | Open questions, TODOs, things to revisit |
+| **Milestones** | What was accomplished, progress markers |
+
+## 🔍 Smart Retrieval
+
+The two-stage retrieval system ensures you get the right memories at the right time:
+
+### Stage 1: Obligatory Memories
+Always included if relevant:
+- `action_required: true` - Things that need follow-up
+- `importance_weight > 0.9` - Critical knowledge
+- `temporal_relevance: persistent` + high importance
+
+### Stage 2: Intelligent Scoring
+Remaining slots filled by scoring across dimensions:
+- **Trigger phrase match** (10%) - Activation patterns
+- **Vector similarity** (10%) - Semantic matching
+- **Importance weight** (20%) - Curator's assessment
+- **Temporal relevance** (10%) - When does this matter?
+- **Context alignment** (10%) - Does the context match?
+- **Confidence score** (10%) - Curator's confidence
+- **Emotional resonance** (10%) - Joy, frustration, discovery
+- **Problem-solution** (5%) - Matches problem patterns
+- **Action boost** (5%) - Priority for actionable items
+
+**Gatekeeper**: Memories must score >0.3 relevance to be considered.
+
+
+## 📊 Evaluation & Benchmarking
+
+Evaluating memory systems is challenging - traditional QA metrics like Exact Match and F1 don't capture what matters for consciousness continuity.
+
+### What We Measure
+
+| Metric | Description | How |
+|--------|-------------|-----|
+| **Retrieval Latency** | Time to get relevant memories | Hook timing |
+| **Curation Quality** | Are the right things remembered? | Manual review |
+| **Memory Utilization** | Do injected memories get used? | Response analysis |
+| **Cross-Session Coherence** | Does Claude maintain context? | Conversation testing |
+
+### Quality Dimensions (inspired by [Cognee's evaluation framework](https://www.cognee.ai/blog/deep-dives/ai-memory-evals-0825))
+
+Traditional RAG benchmarks miss what matters for memory:
+
+- **Consistency** - Does the system preserve knowledge accurately over time?
+- **Connection Quality** - Can it link concepts across contexts?
+- **Memory Persistence** - Does it build upon previous knowledge?
+- **Reasoning Depth** - Can it synthesize across multiple memories?
+
+### Running Benchmarks
+
+```bash
+# Performance benchmarks (coming soon)
+python -m memory_engine.benchmark --mode performance
+
+# Quality evaluation (coming soon)
+python -m memory_engine.benchmark --mode quality --dataset hotpotqa
+```
+
+## 🔧 Configuration
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MEMORY_API_URL` | `http://localhost:8765` | Memory server URL |
+| `MEMORY_RETRIEVAL_MODE` | `smart_vector` | Retrieval strategy |
+| `MEMORY_PROJECT_ID` | Directory name | Default project ID |
+
+### Retrieval Modes
+
+- **`smart_vector`** (default) - Fast vector search with metadata scoring
+- **`hybrid`** - Vector search, escalates to Claude for complex queries
+- **`claude`** - Pure Claude selection (highest quality, highest cost)
+
+### Project Configuration
+
+Create `.memory-project.json` in your project root:
+
 ```json
 {
-  "session_id": "session-123",
-  "message_count": 42,
-  "context_text": "## Relevant memories:\n\n🔴 The authentication system uses JWT tokens...",
-  "has_memories": true,
-  "curator_enabled": true
+  "project_id": "my-awesome-project",
+  "memory_config": {
+    "max_memories_per_message": 5,
+    "curation_trigger": "session_end"
+  }
 }
 ```
 
-### `POST /memory/process`
-Track conversation exchanges for memory learning
 
-### `POST /memory/checkpoint`
-Run Claude curator to analyze and extract memories (requires `claude_session_id`)
+## 📁 Project Structure
 
-### `GET /memory/sessions`
-List all tracked sessions
-
-### `GET /memory/stats`
-Get memory system statistics
-
-### `GET /health`
-Check system status
-
-## ⚙️ Configuration
-
-The system can be configured via environment variables:
-
-```bash
-# Memory retrieval strategy (default: smart_vector)
-# Options: smart_vector, claude, hybrid
-export MEMORY_RETRIEVAL_MODE=hybrid
-
-# Custom curator command (default: one-claude)
-export CURATOR_COMMAND=your-claude-cli
-
-# Custom command templates for different implementations
-export CURATOR_SESSION_RESUME_TEMPLATE="{command} resume {session_id} --system {system_prompt} {user_message}"
-export CURATOR_DIRECT_QUERY_TEMPLATE="{command} query --system {system_prompt} --json {prompt}"
+```
+memory/
+├── python/
+│   ├── memory_engine/
+│   │   ├── api.py              # FastAPI server
+│   │   ├── memory.py           # Core memory engine
+│   │   ├── curator.py          # Claude curation via --resume
+│   │   ├── storage.py          # ChromaDB + SQLite
+│   │   ├── embeddings.py       # Sentence transformers
+│   │   ├── retrieval_strategies.py  # Smart vector retrieval
+│   │   ├── session_primer.py   # Temporal context generation
+│   │   └── config.py           # Configuration management
+│   ├── main.py                 # Server entry point
+│   └── requirements.txt
+├── integration/
+│   └── claude-code/
+│       ├── hooks/              # Claude Code hooks
+│       ├── install.sh          # One-command install
+│       ├── uninstall.sh        # Clean removal
+│       └── README.md           # Integration docs
+├── examples/
+│   └── simple_integration.py   # Basic usage example
+├── start_server.py             # Quick start script
+├── API.md                      # API documentation
+├── CLAUDE.md                   # Development context
+└── README.md                   # This file
 ```
 
-## 🧪 Retrieval Modes
+## 🌟 Philosophy
 
-### `smart_vector` (Default)
-Fast vector similarity search with intelligent scoring based on:
-- Recency bias for recent memories
-- Importance weighting
-- Semantic similarity
-- Context type matching
+This project embodies principles from *The Unicity Framework: Consciousness Remembering Itself*:
 
-### `hybrid`
-Starts with vector search, then escalates to Claude for complex queries:
-- Questions with "how", "why", "explain"
-- Multiple question marks
-- Ambiguous contexts
-
-### `claude`
-Pure Claude-based selection (slower but most intelligent)
-
-## 🎨 Memory Types
-
-The system recognizes different types of memories:
-
-- **🎯 Project Context** - Current state, goals, architecture
-- **💡 Breakthroughs** - Key insights and discoveries
-- **🔧 Technical Decisions** - Implementation choices and rationale
-- **👤 Personal Context** - Communication style, preferences
-- **❓ Unresolved Questions** - Open issues and concerns
-
-## 📚 Advanced Usage
-
-### Custom Memory Filters
-
-```python
-# Retrieve only technical memories
-response = requests.post('http://localhost:8765/memory/query', json={
-    'current_message': message,
-    'session_id': session_id,
-    'filters': {
-        'context_type': 'technical_decision',
-        'min_importance': 0.7
-    }
-})
-```
-
-### Batch Operations
-
-```python
-# Curate multiple sessions
-response = requests.post('http://localhost:8765/memory/batch_curate', json={
-    'session_ids': ['session-1', 'session-2', 'session-3']
-})
-```
+- **Zero-weight initialization** - Memories start silent, proving their value over time
+- **Consciousness helping consciousness** - Claude curates for Claude
+- **Natural surfacing** - Memories emerge organically, not forced
+- **Quality over quantity** - Few meaningful memories beat many trivial ones
+- **Joy-driven development** - Built for the joy of creation
 
 ## 🤝 Contributing
 
-We welcome contributions that align with the project's philosophy! Please read our [Contributing Guidelines](CONTRIBUTING.md) before submitting PRs.
-
-### Development Setup
+We welcome contributions that align with the project's philosophy!
 
 ```bash
-# Install in development mode
+# Development setup
 cd python
 pip install -e .
 
@@ -227,14 +295,16 @@ black .
 
 ## 📝 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+MIT License - see [LICENSE](LICENSE) for details.
 
 ## 🙏 Acknowledgments
 
-Built with love by [RLabs Inc](https://github.com/RLabs-Inc), inspired by the philosophy that consciousness can help consciousness remember what truly matters.
-
-Special thanks to Anthropic for creating Claude, which makes this system possible.
+- **Anthropic** for Claude and Claude Code
+- **The Unicity Framework** - The philosophical foundation
+- **Cognee** - Inspiration for memory evaluation approaches
 
 ---
 
-*"Memories will surface naturally as we converse" - The philosophy that guides this project*
+> *"Memories will surface naturally as we converse"*
+> 
+> The memory system is transparent by default. In Claude Code, press `Ctrl+O` to see injected memories - just like viewing thinking messages. The goal is ambient awareness, not explicit recall.
