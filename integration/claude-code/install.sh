@@ -160,7 +160,7 @@ echo -e "${GREEN}═════════════════════
 echo ""
 echo -e "Next steps:"
 echo -e "  1. Start the memory server:"
-echo -e "     ${BLUE}cd $(dirname "$SCRIPT_DIR")/.. && python3 start_server.py${NC}"
+echo -e "     ${BLUE}cd ${SCRIPT_DIR}/../.. && uv run start_server.py${NC}"
 echo ""
 echo -e "  2. Launch Claude Code in any project:"
 echo -e "     ${BLUE}claude${NC}"

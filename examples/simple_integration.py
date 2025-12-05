@@ -210,7 +210,7 @@ def main():
         else:
             print("❌ Memory engine is not responding properly")
     except requests.exceptions.ConnectionError:
-        print("❌ Memory engine is not running. Start it with: ./start_server.py")
+        print("❌ Memory engine is not running. Start it with: uv run start_server.py")
 
 
 if __name__ == "__main__":
