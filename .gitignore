@@ -1,6 +1,7 @@
 # Reference materials (not part of our project)
 docs/books/
 docs/libraries/
+articles/
 
 # Python
 __pycache__/
