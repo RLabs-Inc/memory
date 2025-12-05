@@ -217,6 +217,146 @@ class MemoryEngine:
             logger.error(f"Checkpoint curation failed: {e}")
             return 0
     
+    async def curate_from_transcript(self, 
+                                     transcript_path: str,
+                                     session_id: str,
+                                     project_id: str,
+                                     trigger: str = "session_end",
+                                     method: str = "sdk") -> int:
+        """
+        Curate memories from a transcript file (NEW transcript-based approach).
+        
+        This is the NEW method that uses TranscriptCurator instead of session resumption.
+        It reads the transcript JSONL, sends it to Claude via SDK or CLI, and stores
+        the curated memories.
+        
+        Args:
+            transcript_path: Path to the JSONL transcript file
+            session_id: Session ID for memory association
+            project_id: Project ID for memory isolation
+            trigger: What triggered this curation (session_end, pre_compact, context_full)
+            method: Curation method - "sdk" (Claude Agent SDK) or "cli" (subprocess)
+            
+        Returns:
+            Number of memories curated
+        """
+        from .transcript_curator import TranscriptCurator
+        
+        vlog.info(f"🎯 Running transcript-based curation: {trigger}")
+        vlog.info(f"📄 Transcript: {transcript_path}")
+        vlog.info(f"🔧 Method: {method}")
+        
+        try:
+            # Create transcript curator (reuses Curator's prompt and parser)
+            transcript_curator = TranscriptCurator(method=method)
+            
+            # Curate from transcript
+            curation_result = await transcript_curator.curate_from_transcript(
+                transcript_path=transcript_path,
+                trigger_type=trigger
+            )
+            
+            # Extract results (same structure as session-based curation)
+            session_summary = curation_result.get('session_summary', '')
+            interaction_tone = curation_result.get('interaction_tone', None)
+            project_snapshot = curation_result.get('project_snapshot', {})
+            curated_memories = curation_result.get('memories', [])
+            
+            # Store session summary with interaction tone
+            if session_summary:
+                self.storage.store_session_summary(session_id, session_summary, project_id, interaction_tone)
+                vlog.info(f"📝 SESSION SUMMARY: {session_summary}")
+                if interaction_tone:
+                    vlog.info(f"🎭 INTERACTION TONE: {interaction_tone}")
+            
+            if project_snapshot and any(project_snapshot.values()):
+                self.storage.store_project_snapshot(session_id, project_snapshot, project_id)
+                vlog.info(f"📸 PROJECT SNAPSHOT:")
+                for key, value in project_snapshot.items():
+                    if value:
+                        vlog.info(f"   - {key}: {value}")
+            
+            # Log curated memories
+            vlog.info(f"🧠 TRANSCRIPT CURATOR EXTRACTED {len(curated_memories)} MEMORIES:")
+            vlog.info("=" * 80)
+            for i, memory in enumerate(curated_memories):
+                vlog.info(f"\n💎 CURATED MEMORY #{i+1}:")
+                vlog.info(f"   📝 Content: \"{memory.content}\"")
+                vlog.info(f"   🤔 Why important: {memory.reasoning}")
+                vlog.info(f"   💪 Weight: {memory.importance_weight:.2f}")
+                vlog.info(f"   🎯 Type: {memory.context_type}")
+                vlog.info(f"   🏷️  Tags: {', '.join(memory.semantic_tags) if isinstance(memory.semantic_tags, list) else memory.semantic_tags}")
+                vlog.info(f"   ⏳ Temporal: {memory.temporal_relevance}")
+                vlog.info(f"   🔴 Action required: {'YES' if memory.action_required else 'No'}")
+                if memory.trigger_phrases:
+                    vlog.info(f"   🎯 Trigger phrases: {', '.join(memory.trigger_phrases)}")
+                if memory.question_types:
+                    vlog.info(f"   ❓ Answers questions: {', '.join(memory.question_types)}")
+                if memory.emotional_resonance:
+                    vlog.info(f"   💝 Emotional context: {memory.emotional_resonance}")
+                if memory.problem_solution_pair:
+                    vlog.info(f"   🔧 Problem→Solution pattern")
+            vlog.info("=" * 80)
+            
+            # Store curated memories (same logic as checkpoint_session)
+            for idx, memory in enumerate(curated_memories):
+                vlog.info(f"💾 STORING CURATED MEMORY {idx+1}/{len(curated_memories)}:")
+                vlog.info(f"   Content: {memory.content}")
+                
+                # Generate embedding for the curated memory
+                memory_embedding = self.embeddings.embed_text(memory.content)
+                vlog.info(f"   Embedding generated: {len(memory_embedding)} dimensions")
+                
+                # Store the curated memory
+                memory_id = self.storage.store_memory(
+                    session_id=session_id,
+                    project_id=project_id,
+                    memory_content=f"[CURATED_MEMORY] {memory.content}",
+                    memory_reasoning=memory.reasoning,
+                    memory_embedding=memory_embedding,
+                    timestamp=time.time(),
+                    metadata={
+                        'curated': True,
+                        'curator_version': '2.0-transcript',  # Mark as transcript-based
+                        'importance_weight': memory.importance_weight,
+                        'context_type': memory.context_type,
+                        'semantic_tags': ','.join(memory.semantic_tags) if isinstance(memory.semantic_tags, list) else memory.semantic_tags,
+                        'temporal_relevance': memory.temporal_relevance,
+                        'knowledge_domain': memory.knowledge_domain,
+                        'action_required': memory.action_required,
+                        'confidence_score': memory.confidence_score,
+                        'trigger': trigger,
+                        'curation_method': method,  # Track which method was used
+                        # Retrieval optimization metadata
+                        'trigger_phrases': ','.join(memory.trigger_phrases) if memory.trigger_phrases else '',
+                        'question_types': ','.join(memory.question_types) if memory.question_types else '',
+                        'emotional_resonance': memory.emotional_resonance,
+                        'problem_solution_pair': memory.problem_solution_pair
+                    }
+                )
+                vlog.info(f"   ✅ Stored with memory ID: {memory_id}")
+            
+            # Mark checkpoint time
+            self.last_checkpoint[session_id] = time.time()
+            
+            # If this was the first session and we curated memories, mark it as completed
+            if curated_memories and self.storage.is_first_session_for_project(project_id):
+                self.storage.mark_first_session_completed(project_id)
+                vlog.info(f"🎉 First session completed for project: {project_id}")
+            
+            # Update project stats
+            if curated_memories:
+                self.storage.update_project_stats(project_id, memories_delta=len(curated_memories))
+            
+            vlog.info(f"✅ Transcript curation complete: {len(curated_memories)} memories curated")
+            return len(curated_memories)
+            
+        except Exception as e:
+            logger.error(f"Transcript curation failed: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return 0
+    
     @log_retrieval
     async def get_context_for_session(self, session_id: str, current_message: str, project_id: Optional[str] = None) -> ConversationContext:
         """

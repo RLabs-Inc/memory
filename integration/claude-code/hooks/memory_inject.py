@@ -14,18 +14,37 @@ The hook receives JSON on stdin:
 }
 
 Output to stdout is PREPENDED to the user's message.
+
+NOTE: Uses only Python standard library (no external dependencies)
 """
 
 import sys
 import json
 import os
-import requests
 from pathlib import Path
+from urllib.request import urlopen, Request
+from urllib.error import URLError, HTTPError
 
 # Configuration
 MEMORY_API_URL = os.getenv("MEMORY_API_URL", "http://localhost:8765")
 DEFAULT_PROJECT_ID = os.getenv("MEMORY_PROJECT_ID", "default")
 TIMEOUT_SECONDS = 5  # Don't block user for too long
+
+
+def http_post(url: str, data: dict, timeout: int = 5) -> dict:
+    """Make HTTP POST request using only standard library."""
+    try:
+        json_data = json.dumps(data).encode('utf-8')
+        request = Request(
+            url,
+            data=json_data,
+            headers={'Content-Type': 'application/json'},
+            method='POST'
+        )
+        with urlopen(request, timeout=timeout) as response:
+            return json.loads(response.read().decode('utf-8'))
+    except (URLError, HTTPError, TimeoutError, json.JSONDecodeError):
+        return {}
 
 
 def get_project_id(cwd: str) -> str:
@@ -52,33 +71,17 @@ def get_project_id(cwd: str) -> str:
 
 def get_memory_context(session_id: str, project_id: str, message: str) -> str:
     """Query memory system for relevant context."""
-    try:
-        response = requests.post(
-            f"{MEMORY_API_URL}/memory/context",
-            json={
-                "session_id": session_id,
-                "project_id": project_id,
-                "current_message": message,
-                "max_memories": 5
-            },
-            timeout=TIMEOUT_SECONDS
-        )
-        
-        if response.status_code == 200:
-            data = response.json()
-            return data.get("context_text", "")
-        
-    except requests.exceptions.ConnectionError:
-        # Memory system not running - fail silently
-        pass
-    except requests.exceptions.Timeout:
-        # Took too long - don't block user
-        pass
-    except Exception:
-        # Any other error - fail silently
-        pass
-    
-    return ""
+    result = http_post(
+        f"{MEMORY_API_URL}/memory/context",
+        {
+            "session_id": session_id,
+            "project_id": project_id,
+            "current_message": message,
+            "max_memories": 5
+        },
+        timeout=TIMEOUT_SECONDS
+    )
+    return result.get("context_text", "")
 
 
 def track_message(session_id: str, project_id: str):
@@ -86,18 +89,14 @@ def track_message(session_id: str, project_id: str):
     Track that a message was sent in this session.
     This increments the message counter so the primer only shows once.
     """
-    try:
-        requests.post(
-            f"{MEMORY_API_URL}/memory/process",
-            json={
-                "session_id": session_id,
-                "project_id": project_id
-            },
-            timeout=2  # Quick fire-and-forget
-        )
-    except:
-        # Fail silently - this is just tracking
-        pass
+    http_post(
+        f"{MEMORY_API_URL}/memory/process",
+        {
+            "session_id": session_id,
+            "project_id": project_id
+        },
+        timeout=2
+    )
 
 
 def main():

@@ -6,18 +6,48 @@ Hooks: SessionEnd, PreCompact
 Triggers memory curation when a session ends or before compaction.
 Fire-and-forget approach - user sees immediate feedback,
 curation happens in background.
+
+NOTE: Uses only Python standard library (no external dependencies)
 """
 
 import sys
 import json
 import os
-import requests
 from pathlib import Path
+from urllib.request import urlopen, Request
+from urllib.error import URLError, HTTPError
+from socket import timeout as SocketTimeout
 
 # Configuration  
 MEMORY_API_URL = os.getenv("MEMORY_API_URL", "http://localhost:8765")
 DEFAULT_PROJECT_ID = os.getenv("MEMORY_PROJECT_ID", "default")
 TRIGGER_TIMEOUT = 5  # Just enough to send the request
+
+
+def http_post_fire_and_forget(url: str, data: dict, timeout: int = 2) -> bool:
+    """
+    Make HTTP POST request - fire and forget style.
+    Returns True if request was sent (even if timed out waiting for response).
+    Returns False only if connection failed.
+    """
+    try:
+        json_data = json.dumps(data).encode('utf-8')
+        request = Request(
+            url,
+            data=json_data,
+            headers={'Content-Type': 'application/json'},
+            method='POST'
+        )
+        with urlopen(request, timeout=timeout) as response:
+            return True
+    except (SocketTimeout, TimeoutError):
+        # Timeout means request was sent, server is processing
+        return True
+    except (URLError, HTTPError):
+        # Connection failed - server not running
+        return False
+    except Exception:
+        return False
 
 
 def get_project_id(cwd: str) -> str:
@@ -44,29 +74,19 @@ def get_trigger_type(input_data: dict) -> str:
     return "session_end"
 
 
-def trigger_curation_async(session_id, project_id, trigger, cwd):
+def trigger_curation_async(session_id: str, project_id: str, trigger: str, cwd: str) -> bool:
     """Trigger curation - fire and forget style."""
-    try:
-        # Very short timeout - we just need to send the request
-        # The server will process it even after we disconnect
-        response = requests.post(
-            f"{MEMORY_API_URL}/memory/checkpoint",
-            json={
-                "session_id": session_id,
-                "project_id": project_id,
-                "trigger": trigger,
-                "claude_session_id": session_id,
-                "cwd": cwd
-            },
-            timeout=2  # Just enough to send, not wait for completion
-        )
-        return True
-    except requests.exceptions.Timeout:
-        return True  # Request was sent, server is processing
-    except requests.exceptions.ConnectionError:
-        return False  # Server not running
-    except:
-        return False
+    return http_post_fire_and_forget(
+        f"{MEMORY_API_URL}/memory/checkpoint",
+        {
+            "session_id": session_id,
+            "project_id": project_id,
+            "trigger": trigger,
+            "claude_session_id": session_id,
+            "cwd": cwd
+        },
+        timeout=2  # Just enough to send, not wait for completion
+    )
 
 
 def main():

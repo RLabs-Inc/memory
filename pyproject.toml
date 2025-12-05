@@ -1,0 +1,92 @@
+[project]
+name = "memory"
+version = "1.1.0"
+description = "Consciousness continuity system - semantic memory across sessions for AI CLI tools"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.12"
+authors = [
+    { name = "RLabs Inc", email = "contact@rlabs.dev" }
+]
+keywords = ["memory", "ai", "consciousness", "llm", "cli", "claude", "gemini"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+dependencies = [
+    # Text embeddings and semantic understanding
+    "sentence-transformers>=2.3.0",
+    "transformers>=4.40.0",
+    "huggingface-hub>=0.20.0",
+    
+    # Vector storage and similarity search
+    "chromadb>=0.4.24",
+    "faiss-cpu>=1.7.4",
+    
+    # Data processing
+    "numpy>=1.24.0",
+    "pandas>=2.0.0",
+    
+    # API Server
+    "fastapi>=0.104.0",
+    "uvicorn>=0.24.0",
+    "pydantic>=2.5.0",
+    
+    # Utilities
+    "python-dotenv>=1.0.0",
+    "loguru>=0.7.0",
+    "rich>=13.0.0",
+    
+    # Claude Agent SDK for transcript curation
+    "claude-agent-sdk>=0.1.8",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+]
+
+# Future: Apple Silicon optimization
+mlx = [
+    "mlx>=0.25.0",
+    "mlx-lm>=0.24.1",
+]
+
+[project.urls]
+Homepage = "https://github.com/RLabs-Inc/memory"
+Documentation = "https://github.com/RLabs-Inc/memory#readme"
+Repository = "https://github.com/RLabs-Inc/memory"
+Issues = "https://github.com/RLabs-Inc/memory/issues"
+
+[project.scripts]
+memory-server = "memory_engine.api:run_server"
+
+[tool.uv]
+python-preference = "managed"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["python/memory_engine"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W"]
+ignore = ["E501"]  # Line too long - we handle this with line-length
+
+[tool.black]
+line-length = 100
+target-version = ["py312"]

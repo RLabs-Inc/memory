@@ -65,6 +65,7 @@ echo -e "${YELLOW}Installing hooks...${NC}"
 cp "$HOOKS_SOURCE/memory_session_start.py" "$HOOKS_DEST/"
 cp "$HOOKS_SOURCE/memory_inject.py" "$HOOKS_DEST/"
 cp "$HOOKS_SOURCE/memory_curate.py" "$HOOKS_DEST/"
+cp "$HOOKS_SOURCE/memory_curate_transcript.py" "$HOOKS_DEST/"
 chmod +x "$HOOKS_DEST"/*.py
 echo -e "${GREEN}✓ Copied memory hooks to $HOOKS_DEST${NC}"
 
@@ -119,7 +120,7 @@ hooks_config = {
             "hooks": [
                 {
                     "type": "command",
-                    "command": "python3 ~/.claude/hooks/memory_curate.py"
+                    "command": "python3 ~/.claude/hooks/memory_curate_transcript.py"
                 }
             ]
         }

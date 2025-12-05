@@ -62,6 +62,26 @@ class CheckpointResponse(BaseModel):
     message: str
 
 
+# NEW: Transcript-based curation models
+class TranscriptCurationRequest(BaseModel):
+    """Request for transcript-based memory curation"""
+    transcript_path: str  # Path to JSONL transcript file
+    project_id: str
+    session_id: Optional[str] = None  # Optional, can be derived from transcript
+    trigger: Literal['session_end', 'pre_compact', 'context_full'] = 'session_end'
+    curation_method: Literal['sdk', 'cli'] = 'sdk'  # Which method to use
+
+
+class TranscriptCurationResponse(BaseModel):
+    """Response from transcript curation"""
+    success: bool
+    trigger: str
+    memories_curated: int = 0
+    session_summary: Optional[str] = None
+    interaction_tone: Optional[str] = None
+    message: str
+
+
 # API Server
 class MemoryAPIWithCurator:
     """Enhanced FastAPI server with Claude curator support"""
@@ -314,6 +334,118 @@ class MemoryAPIWithCurator:
                     "success": False,
                     "message": f"Claude curator test failed: {str(e)}"
                 }
+        
+        @self.app.post("/memory/curate-transcript", response_model=TranscriptCurationResponse)
+        async def curate_transcript(request: TranscriptCurationRequest):
+            """
+            NEW: Curate memories from a transcript file.
+            
+            This is the new approach that:
+            - Reads the JSONL transcript directly
+            - Uses Claude Agent SDK or CLI to analyze
+            - Extracts and stores memories
+            
+            Use cases:
+            - Pre-compaction (before /compact command)
+            - Session end (alternative to --resume approach)
+            - Context full (when approaching token limit)
+            """
+            try:
+                from .transcript_curator import TranscriptCurator
+                import os
+                
+                # Validate transcript exists
+                if not os.path.exists(request.transcript_path):
+                    return TranscriptCurationResponse(
+                        success=False,
+                        trigger=request.trigger,
+                        memories_curated=0,
+                        message=f"Transcript not found: {request.transcript_path}"
+                    )
+                
+                # Create curator with specified method
+                curator = TranscriptCurator(method=request.curation_method)
+                
+                # Curate from transcript
+                logger.info(f"🎯 Starting transcript curation: {request.transcript_path}")
+                logger.info(f"📋 Method: {request.curation_method}, Trigger: {request.trigger}")
+                
+                result = await curator.curate_from_transcript(
+                    transcript_path=request.transcript_path,
+                    trigger_type=request.trigger
+                )
+                
+                # Store curated memories
+                memories = result.get('memories', [])
+                session_id = request.session_id or f"transcript-{os.path.basename(request.transcript_path)}"
+                
+                for memory in memories:
+                    # Generate embedding
+                    memory_embedding = self.memory_engine.embeddings.embed_text(memory.content)
+                    
+                    # Store memory
+                    self.memory_engine.storage.store_memory(
+                        session_id=session_id,
+                        project_id=request.project_id,
+                        memory_content=f"[CURATED_MEMORY] {memory.content}",
+                        memory_reasoning=memory.reasoning,
+                        memory_embedding=memory_embedding,
+                        metadata={
+                            'curated': True,
+                            'curator_version': '2.0-transcript',
+                            'importance_weight': memory.importance_weight,
+                            'context_type': memory.context_type,
+                            'semantic_tags': ','.join(memory.semantic_tags) if isinstance(memory.semantic_tags, list) else memory.semantic_tags,
+                            'temporal_relevance': memory.temporal_relevance,
+                            'knowledge_domain': memory.knowledge_domain,
+                            'action_required': memory.action_required,
+                            'confidence_score': memory.confidence_score,
+                            'trigger': request.trigger,
+                            'trigger_phrases': ','.join(memory.trigger_phrases) if memory.trigger_phrases else '',
+                            'question_types': ','.join(memory.question_types) if memory.question_types else '',
+                            'emotional_resonance': memory.emotional_resonance,
+                            'problem_solution_pair': memory.problem_solution_pair
+                        }
+                    )
+                
+                # Store session summary if available
+                if result.get('session_summary'):
+                    self.memory_engine.storage.store_session_summary(
+                        session_id=session_id,
+                        summary=result['session_summary'],
+                        project_id=request.project_id,
+                        interaction_tone=result.get('interaction_tone')
+                    )
+                
+                # Store project snapshot if available
+                if result.get('project_snapshot'):
+                    self.memory_engine.storage.store_project_snapshot(
+                        session_id=session_id,
+                        snapshot=result['project_snapshot'],
+                        project_id=request.project_id
+                    )
+                
+                logger.info(f"✅ Transcript curation complete: {len(memories)} memories")
+                
+                return TranscriptCurationResponse(
+                    success=True,
+                    trigger=request.trigger,
+                    memories_curated=len(memories),
+                    session_summary=result.get('session_summary'),
+                    interaction_tone=result.get('interaction_tone'),
+                    message=f"Successfully curated {len(memories)} memories from transcript"
+                )
+                
+            except Exception as e:
+                logger.error(f"Transcript curation failed: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
+                return TranscriptCurationResponse(
+                    success=False,
+                    trigger=request.trigger,
+                    memories_curated=0,
+                    message=f"Curation failed: {str(e)}"
+                )
 
 
 def create_app(storage_path: str = "./memory.db", 

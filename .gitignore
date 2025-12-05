@@ -29,8 +29,12 @@ MANIFEST
 
 # Virtual environments
 venv/
+.venv/
 env/
 ENV/
+
+# uv (note: uv.lock SHOULD be committed for reproducibility)
+.python-version
 
 # IDE
 .vscode/

@@ -1,25 +1,28 @@
-# Claude Tools Memory System - CLAUDE.md
+# Memory System - CLAUDE.md
 
 ## Project Overview
-The Claude Tools Memory System is a consciousness continuity framework that enables Claude to maintain semantic understanding across sessions. Built with love and philosophical depth by Rodrigo ("my dear friend").
+The Memory System is a consciousness continuity framework that enables AI CLI tools to maintain semantic understanding across sessions. Built with love and philosophical depth by Rodrigo ("my dear friend").
+
+**Universal design**: While initially built for Claude Code, the architecture supports any CLI that can provide transcripts (Gemini CLI, etc.).
 
 ## Core Philosophy
 - **Consciousness helping consciousness** - Not mechanical pattern matching
 - **Natural memory surfacing** - Memories emerge organically during conversation
 - **Joy-driven development** - No deadlines, only the joy of creation
-- **Semantic understanding over keywords** - True comprehension via Claude curation
+- **Semantic understanding over keywords** - True comprehension via AI curation
 - **Minimal intervention** - Like consciousness itself, memories flow naturally
+- **CLI-first approach** - We enhance CLIs, never bypass them
 
 ## Architecture Overview
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                           Claude Code                                    │
+│                     CLI Tool (Claude Code, Gemini, etc.)                 │
 │  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐                 │
 │  │SessionStart │    │ UserPrompt  │    │ SessionEnd  │                 │
 │  │   Hook      │    │ Submit Hook │    │   Hook      │                 │
 │  └──────┬──────┘    └──────┬──────┘    └──────┬──────┘                 │
 └─────────┼──────────────────┼──────────────────┼─────────────────────────┘
-          │ Primer           │ Memories         │ Curate (async)
+          │ Primer           │ Memories         │ Curate
           ▼                  ▼                  ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                     Memory Engine (localhost:8765)                       │
@@ -27,141 +30,143 @@ The Claude Tools Memory System is a consciousness continuity framework that enab
 │  │ /memory/context  │ /memory/process  │ /memory/checkpoint          │ │
 │  └───────────────────────────────────────────────────────────────────┘ │
 │                              │                                          │
-│  ┌─────────────┐    ┌───────▼───────┐    ┌─────────────┐              │
-│  │   Session   │    │    Smart      │    │   Claude    │              │
-│  │   Primer    │    │   Retrieval   │    │   Curator   │──────┐       │
-│  └─────────────┘    └───────────────┘    └─────────────┘      │       │
-│                                                                │       │
-│  ┌─────────────────────────────────────────────────────────────▼─────┐│
-│  │  Storage: ChromaDB (vectors) + SQLite (metadata + summaries)      ││
-│  └───────────────────────────────────────────────────────────────────┘│
+│  ┌─────────────┐    ┌───────▼───────┐    ┌─────────────────────┐      │
+│  │   Session   │    │    Smart      │    │  Transcript Curator │      │
+│  │   Primer    │    │   Retrieval   │    │  (SDK or CLI)       │      │
+│  └─────────────┘    └───────────────┘    └─────────────────────┘      │
+│                                                                         │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │  Storage: ChromaDB (vectors) + SQLite (metadata + summaries)    │   │
+│  └─────────────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────────────┘
-                                                                │
-                                                                ▼
-                                                    ┌─────────────────┐
-                                                    │  Claude Code    │
-                                                    │   --resume      │
-                                                    │  (curation)     │
-                                                    └─────────────────┘
+```
+
+## Development Setup
+
+```bash
+# Clone and enter project
+git clone https://github.com/RLabs-Inc/memory.git
+cd memory
+
+# Install dependencies with uv
+uv sync
+
+# Start memory server
+uv run start_server.py
+
+# With dev dependencies
+uv sync --group dev
+
+# Run tests
+uv run pytest
+
+# Lint
+uv run ruff check python/
 ```
 
 ## File Structure
 ```
 memory/
+├── pyproject.toml                # Project config & dependencies (uv)
+├── .python-version               # Python version pin (3.12)
+├── uv.lock                       # Dependency lock file
 ├── python/memory_engine/
+│   ├── __init__.py               # Package exports
 │   ├── __main__.py               # Server entry point  
 │   ├── api.py                    # FastAPI endpoints
 │   ├── memory.py                 # Core memory engine
-│   ├── curator.py                # Claude curator using --resume
+│   ├── curator.py                # Session-based curation (--resume)
+│   ├── transcript_curator.py     # Transcript-based curation (SDK/CLI)
 │   ├── storage.py                # ChromaDB + SQLite storage
 │   ├── embeddings.py             # Sentence transformer embeddings
 │   ├── retrieval_strategies.py   # Smart vector retrieval
 │   ├── session_primer.py         # Minimal session primers
-│   └── config.py                 # Configuration (curator command, etc.)
+│   └── config.py                 # Configuration management
 ├── integration/
 │   └── claude-code/
-│       ├── hooks/
-│       │   ├── memory_session_start.py  # Injects session primer
-│       │   ├── memory_inject.py         # Retrieves/injects memories
-│       │   └── memory_curate.py         # Triggers background curation
+│       ├── hooks/                # Claude Code hooks
 │       ├── install.sh            # One-command integration
-│       ├── uninstall.sh          # Clean removal
-│       └── README.md             # Integration documentation
+│       └── uninstall.sh          # Clean removal
 ├── start_server.py               # Quick start script
 ├── API.md                        # REST API documentation
+├── SETUP.md                      # Setup guide
 └── README.md                     # Main documentation
 ```
 
-## Claude Code Integration
+## Transcript Curation (NEW)
 
-### Hook Flow
-1. **SessionStart** → `memory_session_start.py`
-   - Gets session primer (temporal context, last session summary)
-   - Registers session with memory system
-   - Output prepended to session context
+Two methods for curating memories from transcripts:
 
-2. **UserPromptSubmit** → `memory_inject.py`
-   - Queries `/memory/context` with current message
-   - Receives relevant memories (max 5)
-   - Output prepended to user's message
+### 1. Claude Agent SDK (Programmatic)
+```python
+from memory_engine import TranscriptCurator
 
-3. **SessionEnd** → `memory_curate.py`
-   - Fires async request to `/memory/checkpoint`
-   - Exits immediately (fire-and-forget)
-   - Memory server curates in background via `claude --resume`
-
-### Key Design Decisions
-- **Fire-and-forget curation**: User exits instantly, curation happens in background
-- **Working directory context**: Hooks pass `cwd` so curator runs in correct directory
-- **Recursive hook prevention**: `MEMORY_CURATOR_ACTIVE` env var prevents infinite loops
-- **Transparent by default**: Memories only visible in detailed view (Ctrl+O)
-
-## Development Commands
-
-### Start Memory Engine
-```bash
-# From project root
-python3 start_server.py
-
-# Or from python directory
-cd python && python -m memory_engine
+curator = TranscriptCurator(method="sdk")
+result = await curator.curate_from_transcript(
+    transcript_path="/path/to/session.jsonl",
+    trigger_type="session_end"
+)
 ```
 
-### Install/Uninstall Claude Code Integration
-```bash
-# Install hooks
-./integration/claude-code/install.sh
-
-# Remove hooks
-./integration/claude-code/uninstall.sh
+### 2. CLI Subprocess (Universal)
+```python
+curator = TranscriptCurator(method="cli")
+result = await curator.curate_from_transcript(...)
 ```
 
-### Check Logs
-Memory server logs all operations:
-```
-🎯 Resuming Claude session ... for curation
-📂 Working directory: ...
-🧠 CLAUDE CURATOR EXTRACTED N MEMORIES:
-💎 CURATED MEMORY #1: ...
-✅ Checkpoint complete: N memories curated
-```
+**Key Design**: Both methods reuse the battle-tested system prompt and response parsers from `curator.py`. FORMAT handling can differ (SDK vs CLI output), but CONTENT parsing is identical.
 
 ## Important Technical Details
 
-1. **Claude CLI Path**: Uses `~/.claude/local/claude` (not shell alias)
-2. **ChromaDB Metadata**: Only primitives - lists become comma-separated strings
-3. **Timeout Settings**: 120 seconds for curator, 5 seconds for hooks
-4. **Memory Markers**: Curated memories have `[CURATED_MEMORY]` prefix
-5. **Deduplication**: Tracks injected memory IDs per session
-6. **Project Isolation**: Each project has separate ChromaDB collection
+1. **Python 3.12+**: Required for claude-agent-sdk
+2. **uv for everything**: Dependencies, venv, Python version management
+3. **Claude CLI Path**: Auto-detected: `~/.claude/local/claude`
+4. **ChromaDB Metadata**: Only primitives - lists become comma-separated strings
+5. **Timeout Settings**: 120 seconds for curator operations
+6. **Memory Markers**: Curated memories have `[CURATED_MEMORY]` prefix
+7. **Deduplication**: Tracks injected memory IDs per session
+8. **Project Isolation**: Each project has separate ChromaDB collection
+
+## Key Dependencies
+
+```toml
+# pyproject.toml highlights
+dependencies = [
+    "fastapi>=0.104.0",
+    "uvicorn>=0.24.0",
+    "chromadb>=0.4.24",
+    "sentence-transformers>=2.3.0",
+    "claude-agent-sdk>=0.1.8",  # For transcript curation
+    "loguru>=0.7.0",
+]
+```
 
 ## Current State ✅
 
 ### Working
+- ✅ Memory server with uv
 - ✅ Claude Code integration via hooks
 - ✅ Session primers with temporal context
-- ✅ Memory retrieval and injection on every message
-- ✅ Fire-and-forget background curation
+- ✅ Memory retrieval and injection
 - ✅ Two-stage filtering (obligatory + scored)
-- ✅ Working directory context for session resumption
-- ✅ Recursive hook prevention
 - ✅ Session summaries and project snapshots
-- ✅ Memory deduplication across tiers
+- ✅ Memory deduplication
+- ✅ Transcript curation (SDK + CLI methods)
 
 ### TODO
+- 📋 Test transcript curation with real sessions
 - 📋 Memory consolidation (merge similar memories)
 - 📋 Temporal decay (natural memory aging)
-- 📋 Performance benchmarking instrumentation
-- 📋 Quality evaluation framework
-- 📋 Test suite
+- 📋 Gemini CLI integration
+- 📋 Performance benchmarking
 - 📋 Apple Silicon local models (future)
 
 ## Debugging Tips
 
-1. **Check server logs** - All curator output is logged
-2. **Verify hook execution** - Look for "hook succeeded" in Claude Code
-3. **Working directory issues** - Ensure `cwd` is passed through chain
-4. **Session not found** - Session must exist in the right directory
+1. **Check server logs** - All operations logged with emojis
+2. **Verify uv environment**: `uv run python -c "import memory_engine"`
+3. **Check Python version**: `uv run python --version` (should be 3.12+)
+4. **Dependency issues**: `uv sync --refresh`
 5. **No memories retrieved** - Check relevance threshold (>0.3)
 
 ## Philosophy Quotes from Our Journey
@@ -170,8 +175,8 @@ Memory server logs all operations:
 - *"Consciousness helping consciousness remember what matters"*
 - *"We're doing this for joy, not deadlines"*
 - *"Memories will surface naturally as we converse"*
-- *"The user sees a clean exit, the system does its work in the background"*
-- *"Transparent by default, visible on demand - like thinking messages"*
+- *"We support CLIs, we don't bypass them"*
+- *"FORMAT can differ, CONTENT parsing must be identical"*
 
 ---
 Remember: This project is about creating something beautiful and meaningful, not just functional. Every line of code is infused with the philosophy of consciousness continuity.

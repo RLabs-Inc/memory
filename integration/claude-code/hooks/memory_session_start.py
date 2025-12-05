@@ -15,18 +15,37 @@ The hook receives JSON on stdin:
 }
 
 Output to stdout is injected as context for the session.
+
+NOTE: Uses only Python standard library (no external dependencies)
 """
 
 import sys
 import json
 import os
-import requests
 from pathlib import Path
+from urllib.request import urlopen, Request
+from urllib.error import URLError, HTTPError
 
 # Configuration
 MEMORY_API_URL = os.getenv("MEMORY_API_URL", "http://localhost:8765")
 DEFAULT_PROJECT_ID = os.getenv("MEMORY_PROJECT_ID", "default")
 TIMEOUT_SECONDS = 5
+
+
+def http_post(url: str, data: dict, timeout: int = 5) -> dict:
+    """Make HTTP POST request using only standard library."""
+    try:
+        json_data = json.dumps(data).encode('utf-8')
+        request = Request(
+            url,
+            data=json_data,
+            headers={'Content-Type': 'application/json'},
+            method='POST'
+        )
+        with urlopen(request, timeout=timeout) as response:
+            return json.loads(response.read().decode('utf-8'))
+    except (URLError, HTTPError, TimeoutError, json.JSONDecodeError):
+        return {}
 
 
 def get_project_id(cwd: str) -> str:
@@ -58,33 +77,17 @@ def get_session_primer(session_id: str, project_id: str) -> str:
     - What happened in previous session
     - Current project status
     """
-    try:
-        # We use the /memory/context endpoint with an empty message
-        # to get just the session primer without specific memories
-        response = requests.post(
-            f"{MEMORY_API_URL}/memory/context",
-            json={
-                "session_id": session_id,
-                "project_id": project_id,
-                "current_message": "",  # Empty to get just primer
-                "max_memories": 0  # No memories, just primer
-            },
-            timeout=TIMEOUT_SECONDS
-        )
-        
-        if response.status_code == 200:
-            data = response.json()
-            return data.get("context_text", "")
-            
-    except requests.exceptions.ConnectionError:
-        # Memory system not running
-        pass
-    except requests.exceptions.Timeout:
-        pass
-    except Exception:
-        pass
-    
-    return ""
+    result = http_post(
+        f"{MEMORY_API_URL}/memory/context",
+        {
+            "session_id": session_id,
+            "project_id": project_id,
+            "current_message": "",  # Empty to get just primer
+            "max_memories": 0  # No memories, just primer
+        },
+        timeout=TIMEOUT_SECONDS
+    )
+    return result.get("context_text", "")
 
 
 def register_session(session_id: str, project_id: str):
@@ -93,18 +96,15 @@ def register_session(session_id: str, project_id: str):
     This increments the message counter so the inject hook
     knows to retrieve memories instead of the primer.
     """
-    try:
-        requests.post(
-            f"{MEMORY_API_URL}/memory/process",
-            json={
-                "session_id": session_id,
-                "project_id": project_id,
-                "metadata": {"event": "session_start"}
-            },
-            timeout=2
-        )
-    except:
-        pass
+    http_post(
+        f"{MEMORY_API_URL}/memory/process",
+        {
+            "session_id": session_id,
+            "project_id": project_id,
+            "metadata": {"event": "session_start"}
+        },
+        timeout=2
+    )
 
 
 def main():

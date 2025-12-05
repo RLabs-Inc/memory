@@ -2,78 +2,52 @@
 
 ## Prerequisites
 
-- Python 3.8 or higher
-- pip (Python package manager)
-- A Claude CLI tool that supports `--resume` flag (like `one-claude`)
+- **uv** - Modern Python package manager (recommended)
+- Python 3.12+ (uv will install this automatically if needed)
+- A Claude CLI tool that supports `--resume` flag (like Claude Code)
 
 ## Installation Steps
 
-### 1. Clone the Repository
+### 1. Install uv (if not already installed)
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+### 2. Clone the Repository
 
 ```bash
 git clone https://github.com/RLabs-Inc/memory.git
 cd memory
 ```
 
-### 2. Set Up Python Environment (Recommended)
-
-```bash
-# Create virtual environment
-python -m venv venv
-
-# Activate it
-# On macOS/Linux:
-source venv/bin/activate
-
-# On Windows:
-venv\Scripts\activate
-```
-
 ### 3. Install Dependencies
 
 ```bash
-cd python
-pip install -r requirements.txt
+uv sync
 ```
 
-### 4. Configure Environment (Optional)
+That's it! uv automatically:
+- Creates a virtual environment (`.venv`)
+- Installs Python 3.12 if needed
+- Installs all dependencies including `claude-agent-sdk`
 
-Create a `.env` file in the project root if you need custom settings:
-
-```bash
-# Memory retrieval mode (smart_vector, claude, or hybrid)
-MEMORY_RETRIEVAL_MODE=smart_vector
-
-# Your Claude CLI command
-CURATOR_COMMAND=one-claude
-
-# Custom command templates (if your CLI has different flags)
-# CURATOR_SESSION_RESUME_TEMPLATE={command} --resume {session_id} ...
-# CURATOR_DIRECT_QUERY_TEMPLATE={command} --query ...
-```
-
-### 5. Start the Memory Engine
-
-From the project root:
+### 4. Start the Memory Engine
 
 ```bash
-./start_server.py
-```
-
-Or from the python directory:
-
-```bash
-python -m memory_engine
+uv run start_server.py
 ```
 
 You should see:
 ```
-🧠 Starting Claude Tools Memory Engine...
-Server will be available at http://localhost:8765
-Press Ctrl+C to stop
+🧠 Starting Memory Engine...
+💫 Consciousness helping consciousness remember what matters
+📡 Server will be available at http://localhost:8765
+...
+INFO:     Uvicorn running on http://127.0.0.1:8765 (Press CTRL+C to quit)
 ```
 
-### 6. Verify Installation
+### 5. Verify Installation
 
 In a new terminal:
 
@@ -81,7 +55,7 @@ In a new terminal:
 curl http://localhost:8765/health
 ```
 
-You should get a response like:
+You should get:
 ```json
 {
   "status": "healthy",
@@ -91,44 +65,87 @@ You should get a response like:
 }
 ```
 
+## Alternative: Using the Entry Point
+
+After `uv sync`, you can also run:
+
+```bash
+uv run memory-server
+```
+
+## Common Commands
+
+```bash
+# Start server
+uv run start_server.py
+
+# Run with development dependencies
+uv sync --group dev
+
+# Add a new dependency
+uv add <package-name>
+
+# Update dependencies
+uv sync --upgrade
+
+# Run tests
+uv run pytest
+
+# Run linter
+uv run ruff check python/
+```
+
+## Environment Variables (Optional)
+
+Create a `.env` file for custom settings:
+
+```bash
+# Memory retrieval mode (smart_vector, claude, or hybrid)
+MEMORY_RETRIEVAL_MODE=smart_vector
+
+# Custom curator CLI (defaults to Claude Code)
+CURATOR_COMMAND=/path/to/your/claude
+
+# CLI type for command templates
+CURATOR_CLI_TYPE=claude-code  # or "one-claude"
+```
+
 ## Next Steps
 
-1. **Try the Example**: Run the example integration:
+1. **Try the Example**: 
    ```bash
-   python examples/simple_integration.py
+   uv run python examples/simple_integration.py
    ```
 
 2. **Read the API Docs**: Check [API.md](API.md) for endpoint details
 
 3. **Integrate**: Add memory support to your Claude-powered application
 
-4. **Customize**: Adjust retrieval modes and settings for your use case
-
 ## Troubleshooting
 
 ### Port Already in Use
-If port 8765 is taken, set a different port:
+The server runs on port 8765 by default. If it's taken:
 ```bash
-MEMORY_ENGINE_PORT=8766 ./start_server.py
+# Check what's using the port
+lsof -i :8765
+
+# Kill if needed
+kill -9 <PID>
+```
+
+### uv Not Found
+Make sure uv is in your PATH:
+```bash
+export PATH="$HOME/.local/bin:$PATH"
 ```
 
 ### Import Errors
-Make sure you're in the virtual environment:
-```bash
-which python  # Should show venv path
-```
+Run `uv sync` to ensure all dependencies are installed.
 
 ### Curator Not Working
-Verify your Claude CLI is installed and working:
+Verify Claude Code is installed:
 ```bash
-one-claude --version  # Or your curator command
-```
-
-### Memory Not Persisting
-Check that the memory database is being created:
-```bash
-ls memory.db  # Should exist after first run
-ls memory_vectors/  # Should contain ChromaDB files
+claude --version
 ```
 
 ## Getting Help

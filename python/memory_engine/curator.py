@@ -723,3 +723,60 @@ Return a JSON array of memory indices (0-based) in order of relevance:"""
         
         # Fallback to first N memories
         return all_memories[:max_memories]
+    
+    # =========================================================================
+    # NEW: Transcript-based curation (universal endpoint)
+    # =========================================================================
+    
+    def _format_transcript_for_curator(self, transcript_entries: List[Dict[str, Any]]) -> str:
+        """
+        Format JSONL transcript entries into readable conversation text.
+        
+        Args:
+            transcript_entries: List of parsed JSONL entries from Claude Code transcript
+            
+        Returns:
+            Formatted conversation text for the curator
+        """
+        formatted_lines = []
+        
+        for entry in transcript_entries:
+            entry_type = entry.get('type', '')
+            timestamp = entry.get('timestamp', '')
+            
+            if entry_type == 'user':
+                # User message
+                message = entry.get('message', {})
+                content = message.get('content', '')
+                if isinstance(content, str):
+                    formatted_lines.append(f"[USER] {content}")
+                elif isinstance(content, list):
+                    # Handle multi-part content
+                    text_parts = [p.get('text', '') for p in content if p.get('type') == 'text']
+                    formatted_lines.append(f"[USER] {' '.join(text_parts)}")
+                    
+            elif entry_type == 'assistant':
+                # Assistant message
+                message = entry.get('message', {})
+                content = message.get('content', [])
+                if isinstance(content, str):
+                    formatted_lines.append(f"[ASSISTANT] {content}")
+                elif isinstance(content, list):
+                    # Handle multi-part content (text blocks, tool use, etc.)
+                    text_parts = []
+                    for part in content:
+                        if part.get('type') == 'text':
+                            text_parts.append(part.get('text', ''))
+                        elif part.get('type') == 'tool_use':
+                            # Note tool usage but don't include full details
+                            tool_name = part.get('name', 'unknown_tool')
+                            text_parts.append(f"[Used tool: {tool_name}]")
+                    formatted_lines.append(f"[ASSISTANT] {' '.join(text_parts)}")
+                    
+            elif entry_type == 'summary':
+                # Context compaction summary - important context!
+                summary = entry.get('summary', '')
+                if summary:
+                    formatted_lines.append(f"[CONTEXT SUMMARY] {summary}")
+        
+        return "\n\n".join(formatted_lines)

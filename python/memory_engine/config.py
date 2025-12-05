@@ -60,11 +60,14 @@ class CuratorConfig:
     TEMPLATES = {
         'claude-code': {
             'session_resume': '{command} --resume {session_id} -p "{user_message}" --append-system-prompt "{system_prompt}" --output-format json',
-            'direct_query': '{command} -p "{prompt}" --append-system-prompt "{system_prompt}" --output-format json --max-turns 1'
+            'direct_query': '{command} -p "{prompt}" --append-system-prompt "{system_prompt}" --output-format json --max-turns 1',
+            # One-shot transcript curation - no session resumption, just analyze provided transcript
+            'transcript_curation': '{command} -p "{prompt}" --output-format json --max-turns 1'
         },
         'one-claude': {
             'session_resume': '{command} -n --resume {session_id} --system-prompt "{system_prompt}" --format json "{user_message}"',
-            'direct_query': '{command} --append-system-prompt "{system_prompt}" --output-format json --max-turns 1 --print "{prompt}"'
+            'direct_query': '{command} --append-system-prompt "{system_prompt}" --output-format json --max-turns 1 --print "{prompt}"',
+            'transcript_curation': '{command} --output-format json --max-turns 1 --print "{prompt}"'
         }
     }
     
@@ -92,6 +95,13 @@ class CuratorConfig:
         self.direct_query_template = os.getenv(
             "CURATOR_DIRECT_QUERY_TEMPLATE",
             default_template['direct_query']
+        )
+        
+        # Command template for one-shot transcript curation
+        # Used when we have a transcript (JSONL) and want to curate without session resumption
+        self.transcript_curation_template = os.getenv(
+            "CURATOR_TRANSCRIPT_TEMPLATE",
+            default_template['transcript_curation']
         )
         
         # Additional flags that might be needed for specific implementations
@@ -141,6 +151,34 @@ class CuratorConfig:
         cmd_string = self.direct_query_template.format(
             command=self.curator_command,
             system_prompt=system_prompt,
+            prompt=prompt
+        )
+        
+        # Use shlex to properly handle quoted arguments
+        cmd = shlex.split(cmd_string)
+        
+        # Add any extra flags
+        if self.extra_flags:
+            cmd.extend(self.extra_flags)
+            
+        return cmd
+    
+    def get_transcript_curation_command(self, prompt: str) -> List[str]:
+        """
+        Build the command for one-shot transcript curation.
+        
+        This is used when we have a transcript (from JSONL file) and want
+        to curate memories without resuming a session.
+        
+        Args:
+            prompt: The full prompt including transcript and curation instructions
+            
+        Returns:
+            List of command arguments
+        """
+        # Build command from template
+        cmd_string = self.transcript_curation_template.format(
+            command=self.curator_command,
             prompt=prompt
         )
         
