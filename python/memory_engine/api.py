@@ -42,8 +42,9 @@ class CheckpointRequest(BaseModel):
     session_id: str
     project_id: str  # Added back project support
     trigger: Literal['session_end', 'pre_compact', 'context_full'] = 'session_end'
-    claude_session_id: Optional[str] = None  # NEW: Claude Code session ID for resumption
-    cwd: Optional[str] = None  # Working directory where Claude Code session lives
+    claude_session_id: Optional[str] = None  # CLI session ID for resumption
+    cwd: Optional[str] = None  # Working directory where CLI session lives
+    cli_type: Optional[Literal['claude-code', 'gemini-cli']] = None  # Which CLI is calling (default: claude-code)
 
 
 class ContextResponse(BaseModel):
@@ -70,6 +71,7 @@ class TranscriptCurationRequest(BaseModel):
     session_id: Optional[str] = None  # Optional, can be derived from transcript
     trigger: Literal['session_end', 'pre_compact', 'context_full'] = 'session_end'
     curation_method: Literal['sdk', 'cli'] = 'sdk'  # Which method to use
+    cli_type: Optional[Literal['claude-code', 'gemini-cli']] = None  # Which CLI to use for curation (default: claude-code)
 
 
 class TranscriptCurationResponse(BaseModel):
@@ -246,7 +248,8 @@ class MemoryAPIWithCurator:
                         project_id=request.project_id,
                         trigger=request.trigger,
                         claude_session_id=request.claude_session_id,
-                        cwd=request.cwd  # Pass working directory
+                        cwd=request.cwd,  # Pass working directory
+                        cli_type=request.cli_type  # Pass CLI type for correct command/transcript handling
                     )
                     
                     return CheckpointResponse(
@@ -363,8 +366,11 @@ class MemoryAPIWithCurator:
                         message=f"Transcript not found: {request.transcript_path}"
                     )
                 
-                # Create curator with specified method
-                curator = TranscriptCurator(method=request.curation_method)
+                # Create curator with specified method and CLI type
+                curator = TranscriptCurator(
+                    method=request.curation_method,
+                    cli_type=request.cli_type  # Pass CLI type for correct command handling
+                )
                 
                 # Curate from transcript
                 logger.info(f"🎯 Starting transcript curation: {request.transcript_path}")

@@ -78,44 +78,48 @@ class MemoryEngine:
     
     # No phases in curator-only approach - memories are used when relevant
     
-    async def checkpoint_session(self, session_id: str, project_id: str, trigger: str = "session_end", claude_session_id: Optional[str] = None, cwd: Optional[str] = None) -> int:
+    async def checkpoint_session(self, session_id: str, project_id: str, trigger: str = "session_end", claude_session_id: Optional[str] = None, cwd: Optional[str] = None, cli_type: Optional[str] = None) -> int:
         """
-        Run Claude curator at a checkpoint to extract important memories.
-        
+        Run curator at a checkpoint to extract important memories.
+
         Args:
             session_id: Our internal session ID
             project_id: Project ID for memory isolation
             trigger: What triggered this checkpoint
-            claude_session_id: The Claude Code session ID to resume for curation
-            cwd: Working directory where Claude Code session lives
-            
+            claude_session_id: The CLI session ID to resume for curation
+            cwd: Working directory where CLI session lives
+            cli_type: Which CLI is calling ("claude-code" or "gemini-cli", default: claude-code)
+
         Returns the number of memories curated.
         """
-        
+        # Default to claude-code if not specified
+        cli_type = cli_type or "claude-code"
+
         # Check if session has any messages
         if session_id not in self.session_metadata or self.session_metadata[session_id]['message_count'] == 0:
             vlog.info(f"No messages in session {session_id}")
             return 0
-        
+
         message_count = self.session_metadata[session_id]['message_count']
-        vlog.info(f"🎯 Running Claude curation checkpoint: {trigger}")
+        vlog.info(f"🎯 Running curation checkpoint: {trigger} (CLI: {cli_type})")
         vlog.info(f"📊 Analyzing {message_count} messages in session")
-        
+
         try:
             # Session-based curation is required
             if not claude_session_id:
-                vlog.warning("⚠️  No Claude session ID provided - cannot curate memories")
+                vlog.warning("⚠️  No CLI session ID provided - cannot curate memories")
                 vlog.warning("   Session-based curation is required for the memory system")
                 return 0
-            
-            # Resume Claude session for curation
-            vlog.info(f"🎯 Resuming Claude session {claude_session_id} for curation")
+
+            # Resume CLI session for curation
+            vlog.info(f"🎯 Resuming {cli_type} session {claude_session_id} for curation")
             if cwd:
                 vlog.info(f"📂 Working directory: {cwd}")
             curation_result = await self.curator.curate_from_session(
                 claude_session_id=claude_session_id,
                 trigger_type=trigger,
-                cwd=cwd
+                cwd=cwd,
+                cli_type=cli_type  # Pass CLI type to curator
             )
             
             # Extract results

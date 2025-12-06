@@ -83,8 +83,12 @@ memory/
 │   ├── session_primer.py         # Minimal session primers
 │   └── config.py                 # Configuration management
 ├── integration/
-│   └── claude-code/
-│       ├── hooks/                # Claude Code hooks
+│   ├── claude-code/
+│   │   ├── hooks/                # Claude Code hooks
+│   │   ├── install.sh            # One-command integration
+│   │   └── uninstall.sh          # Clean removal
+│   └── gemini-cli/
+│       ├── hooks/                # Gemini CLI hooks
 │       ├── install.sh            # One-command integration
 │       └── uninstall.sh          # Clean removal
 ├── start_server.py               # Quick start script
@@ -120,12 +124,15 @@ result = await curator.curate_from_transcript(...)
 
 1. **Python 3.12+**: Required for claude-agent-sdk
 2. **uv for everything**: Dependencies, venv, Python version management
-3. **Claude CLI Path**: Auto-detected: `~/.claude/local/claude`
-4. **ChromaDB Metadata**: Only primitives - lists become comma-separated strings
-5. **Timeout Settings**: 120 seconds for curator operations
-6. **Memory Markers**: Curated memories have `[CURATED_MEMORY]` prefix
-7. **Deduplication**: Tracks injected memory IDs per session
-8. **Project Isolation**: Each project has separate ChromaDB collection
+3. **CLI Auto-Detection**:
+   - Claude Code: `~/.claude/local/claude` or `CURATOR_COMMAND` env var
+   - Gemini CLI: `gemini` in PATH or `GEMINI_COMMAND` env var
+4. **CLI Type Identification**: Hooks send `cli_type` parameter to identify themselves
+5. **ChromaDB Metadata**: Only primitives - lists become comma-separated strings
+6. **Timeout Settings**: 120 seconds for curator operations
+7. **Memory Markers**: Curated memories have `[CURATED_MEMORY]` prefix
+8. **Deduplication**: Tracks injected memory IDs per session
+9. **Project Isolation**: Each project has separate ChromaDB collection
 
 ## Key Dependencies
 
@@ -146,6 +153,8 @@ dependencies = [
 ### Working
 - ✅ Memory server with uv
 - ✅ Claude Code integration via hooks
+- ✅ Gemini CLI integration via hooks
+- ✅ CLI-type auto-detection (hooks identify themselves)
 - ✅ Session primers with temporal context
 - ✅ Memory retrieval and injection
 - ✅ Two-stage filtering (obligatory + scored)
@@ -157,7 +166,6 @@ dependencies = [
 - 📋 Test transcript curation with real sessions
 - 📋 Memory consolidation (merge similar memories)
 - 📋 Temporal decay (natural memory aging)
-- 📋 Gemini CLI integration
 - 📋 Performance benchmarking
 - 📋 Apple Silicon local models (future)
 

@@ -16,26 +16,61 @@ from typing import List, Optional
 def get_claude_command() -> str:
     """
     Get the path to the Claude CLI command.
-    
+
     Checks in order:
     1. CURATOR_COMMAND environment variable (explicit override)
     2. ~/.claude/local/claude (standard Claude Code installation)
     3. 'claude' (fallback to PATH)
-    
+
     Returns the first one that exists.
     """
     # Check for explicit override
     env_command = os.getenv("CURATOR_COMMAND")
     if env_command:
         return env_command
-    
+
     # Check standard Claude Code installation path (works for any user)
     claude_local = Path.home() / ".claude" / "local" / "claude"
     if claude_local.exists():
         return str(claude_local)
-    
+
     # Fallback to PATH (might find old version, but better than nothing)
     return "claude"
+
+
+def get_gemini_command() -> str:
+    """
+    Get the path to the Gemini CLI command.
+
+    Checks in order:
+    1. GEMINI_COMMAND environment variable (explicit override)
+    2. 'gemini' in PATH (standard npm global installation)
+
+    Returns the command to use.
+    """
+    # Check for explicit override
+    env_command = os.getenv("GEMINI_COMMAND")
+    if env_command:
+        return env_command
+
+    # Gemini CLI is typically installed via npm and available in PATH
+    return "gemini"
+
+
+def get_curator_command(cli_type: str) -> str:
+    """
+    Get the appropriate CLI command based on the CLI type.
+
+    Args:
+        cli_type: One of 'claude-code', 'one-claude', or 'gemini-cli'
+
+    Returns:
+        The command path to use
+    """
+    if cli_type == 'gemini-cli':
+        return get_gemini_command()
+    else:
+        return get_claude_command()
 
 class MemoryEngineConfig:
     """Configuration for the memory engine."""
@@ -56,7 +91,7 @@ class CuratorConfig:
     """Configuration for curator integration."""
     
     # Pre-defined templates for different CLI implementations
-    # Note: {command} will be replaced with the detected claude path
+    # Note: {command} will be replaced with the detected CLI path
     TEMPLATES = {
         'claude-code': {
             'session_resume': '{command} --resume {session_id} -p "{user_message}" --append-system-prompt "{system_prompt}" --output-format json',
@@ -68,20 +103,28 @@ class CuratorConfig:
             'session_resume': '{command} -n --resume {session_id} --system-prompt "{system_prompt}" --format json "{user_message}"',
             'direct_query': '{command} --append-system-prompt "{system_prompt}" --output-format json --max-turns 1 --print "{prompt}"',
             'transcript_curation': '{command} --output-format json --max-turns 1 --print "{prompt}"'
+        },
+        'gemini-cli': {
+            # Gemini CLI headless mode - uses -p for prompt, --output-format json for structured output
+            # Note: Gemini doesn't have --append-system-prompt, so we include system prompt in the prompt itself
+            'session_resume': '{command} --resume {session_id} -p "{user_message}" --output-format json',
+            'direct_query': '{command} -p "{prompt}" --output-format json',
+            # One-shot transcript curation - headless mode with JSON output
+            'transcript_curation': '{command} -p "{prompt}" --output-format json'
         }
     }
     
     def __init__(self):
         """Initialize curator configuration from environment or defaults."""
-        # Which CLI implementation to use: "claude-code" (default) or "one-claude"
+        # Which CLI implementation to use: "claude-code" (default), "one-claude", or "gemini-cli"
         self.cli_type = os.getenv("CURATOR_CLI_TYPE", "claude-code")
-        
+
         # Get default template based on CLI type
         default_template = self.TEMPLATES.get(self.cli_type, self.TEMPLATES['claude-code'])
-        
+
         # The command to execute for curation
-        # Uses smart detection: env var > ~/.claude/local/claude > PATH
-        self.curator_command = get_claude_command()
+        # Uses smart detection based on CLI type
+        self.curator_command = get_curator_command(self.cli_type)
         
         # Command template for session resumption
         # Users can override this with their own template

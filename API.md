@@ -1,4 +1,6 @@
-# Claude Memory System - API Documentation
+# Memory System - API Documentation
+
+> Supports both Claude Code and Gemini CLI integrations
 
 ## Base URL
 ```
@@ -73,7 +75,7 @@ Content-Type: application/json
 ```
 
 ### 🧠 Checkpoint Session (Curate)
-Analyze a conversation session and extract meaningful memories using Claude.
+Analyze a conversation session and extract meaningful memories using Claude or Gemini.
 
 ```http
 POST /memory/checkpoint
@@ -85,10 +87,14 @@ Content-Type: application/json
 {
   "session_id": "string",               // Required: Session to curate
   "project_id": "string",               // Required: Project identifier
-  "claude_session_id": "string",        // Optional: Claude's session ID for --resume
-  "trigger": "session_end"              // Required: One of: session_end, pre_compact, context_full
+  "claude_session_id": "string",        // Optional: CLI session ID for --resume
+  "cwd": "string",                      // Optional: Working directory of the CLI session
+  "trigger": "session_end",             // Required: One of: session_end, pre_compact, context_full
+  "cli_type": "claude-code"             // Optional: "claude-code" (default) or "gemini-cli"
 }
 ```
+
+The `cli_type` parameter tells the server which CLI to use for curation. Hooks automatically send this parameter to identify themselves.
 
 #### Response
 ```json
@@ -288,9 +294,17 @@ curl -X POST http://localhost:8765/memory/checkpoint \
 
 1. **Project ID**: Always use consistent project IDs to keep memories organized
 2. **Session ID**: Each conversation should have a unique session ID
-3. **Claude Session ID**: Required for curation - get this from your Claude integration
-4. **Memory Context**: The `context_text` is pre-formatted - inject it as-is into your prompts
-5. **Curation Timing**: Run checkpoint when sessions end or when context gets full
+3. **CLI Session ID**: Required for curation - get this from your Claude Code or Gemini CLI integration
+4. **CLI Type**: When integrating a new CLI, send `cli_type` to identify which CLI commands to use
+5. **Memory Context**: The `context_text` is pre-formatted - inject it as-is into your prompts
+6. **Curation Timing**: Run checkpoint when sessions end or when context gets full
+
+## Supported CLIs
+
+| CLI | cli_type | Session Resume |
+|-----|----------|----------------|
+| Claude Code | `claude-code` (default) | `claude --resume <id> -p "..." --output-format json` |
+| Gemini CLI | `gemini-cli` | `gemini --resume <id> -p "..." --output-format json` |
 
 ## Performance
 

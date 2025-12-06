@@ -150,42 +150,56 @@ class TranscriptParser:
 class TranscriptCurator:
     """
     Curates memories from CLI transcript files.
-    
+
     Two methods supported:
     1. "sdk" - Claude Agent SDK (programmatic, clean Python)
     2. "cli" - CLI subprocess (universal, works with any CLI)
-    
+
     Both use the user's subscription - NO API keys.
-    
+
     Reuses the battle-tested system prompt and response parsers from Curator.
     """
-    
-    def __init__(self, 
+
+    def __init__(self,
                  method: Literal["sdk", "cli"] = "sdk",
-                 cli_command: Optional[str] = None):
+                 cli_command: Optional[str] = None,
+                 cli_type: Optional[str] = None):
         """
         Initialize the transcript curator.
-        
+
         Args:
             method: "sdk" for Claude Agent SDK, "cli" for subprocess
-            cli_command: CLI command for "cli" method (default: auto-detect)
+            cli_command: CLI command for "cli" method (default: auto-detect based on cli_type)
+            cli_type: Which CLI to use ("claude-code" or "gemini-cli", default: claude-code)
         """
         self.method = method
+        self.cli_type = cli_type or "claude-code"
         self.parser = TranscriptParser()
-        
+
         # Reuse existing Curator - it has the fine-tuned prompt and parsers!
         self._curator = Curator()
-        
-        # For CLI method, use config to get command
+
+        # For CLI method, use config to get command based on cli_type
         if method == "cli":
-            from .config import curator_config
-            self.cli_command = cli_command or curator_config.curator_command
-            self.config = curator_config
+            from .config import CuratorConfig, get_curator_command
+
+            # Create config with the specified CLI type
+            self.config = CuratorConfig()
+            # Override CLI type if specified
+            if cli_type:
+                self.config.cli_type = cli_type
+                # Get the correct command for this CLI type
+                self.cli_command = cli_command or get_curator_command(cli_type)
+                # Update template to match CLI type
+                template = self.config.TEMPLATES.get(cli_type, self.config.TEMPLATES['claude-code'])
+                self.config.transcript_curation_template = template['transcript_curation']
+            else:
+                self.cli_command = cli_command or self.config.curator_command
         else:
             self.cli_command = None
             self.config = None
-        
-        logger.info(f"🧠 TranscriptCurator initialized - method: {method}")
+
+        logger.info(f"🧠 TranscriptCurator initialized - method: {method}, cli_type: {self.cli_type}")
         if method == "cli":
             logger.info(f"   CLI command: {self.cli_command}")
     
@@ -430,35 +444,55 @@ class TranscriptCurator:
 
 async def curate_transcript(transcript_path: str,
                            method: Literal["sdk", "cli"] = "sdk",
-                           cli_command: Optional[str] = None) -> Dict[str, Any]:
+                           cli_command: Optional[str] = None,
+                           cli_type: Optional[str] = None) -> Dict[str, Any]:
     """
     Convenience function to curate a transcript file.
-    
+
     Args:
         transcript_path: Path to the .jsonl transcript file
         method: "sdk" or "cli"
         cli_command: CLI command for "cli" method
-        
+        cli_type: Which CLI to use ("claude-code" or "gemini-cli")
+
     Returns:
         Dictionary with session_summary, project_snapshot, and memories
     """
-    curator = TranscriptCurator(method=method, cli_command=cli_command)
+    curator = TranscriptCurator(method=method, cli_command=cli_command, cli_type=cli_type)
     return await curator.curate_from_transcript(transcript_path)
 
 
-def get_transcript_path(session_id: str, project_path: Optional[str] = None) -> Optional[str]:
+def get_transcript_path(session_id: str, project_path: Optional[str] = None, cli_type: str = "claude-code") -> Optional[str]:
+    """
+    Get the transcript file path for a CLI session.
+
+    Args:
+        session_id: The session ID (UUID)
+        project_path: Optional project path to narrow down search
+        cli_type: Which CLI to search for ("claude-code" or "gemini-cli")
+
+    Returns:
+        Path to the transcript file, or None if not found
+    """
+    if cli_type == "gemini-cli":
+        return get_gemini_transcript_path(session_id, project_path)
+    else:
+        return get_claude_transcript_path(session_id, project_path)
+
+
+def get_claude_transcript_path(session_id: str, project_path: Optional[str] = None) -> Optional[str]:
     """
     Get the transcript file path for a Claude Code session.
-    
+
     Args:
         session_id: The Claude Code session ID
         project_path: Optional project path to narrow down search
-        
+
     Returns:
         Path to the transcript file, or None if not found
     """
     claude_dir = Path.home() / ".claude"
-    
+
     # If project path provided, look in project-specific directory
     if project_path:
         # Claude Code stores transcripts in ~/.claude/projects/<encoded-path>/
@@ -466,13 +500,13 @@ def get_transcript_path(session_id: str, project_path: Optional[str] = None) -> 
         encoded_path = project_path.replace('/', '-')
         if encoded_path.startswith('-'):
             encoded_path = encoded_path[1:]
-        
+
         project_dir = claude_dir / "projects" / encoded_path
         if project_dir.exists():
             transcript = project_dir / f"{session_id}.jsonl"
             if transcript.exists():
                 return str(transcript)
-    
+
     # Search all project directories
     projects_dir = claude_dir / "projects"
     if projects_dir.exists():
@@ -481,6 +515,46 @@ def get_transcript_path(session_id: str, project_path: Optional[str] = None) -> 
                 transcript = project_dir / f"{session_id}.jsonl"
                 if transcript.exists():
                     return str(transcript)
-    
-    logger.warning(f"Transcript not found for session: {session_id}")
+
+    logger.warning(f"Claude transcript not found for session: {session_id}")
+    return None
+
+
+def get_gemini_transcript_path(session_id: str, project_path: Optional[str] = None) -> Optional[str]:
+    """
+    Get the transcript file path for a Gemini CLI session.
+
+    Gemini CLI stores sessions in ~/.gemini/tmp/<project_hash>/chats/
+
+    Args:
+        session_id: The Gemini CLI session ID (UUID)
+        project_path: Optional project path to narrow down search
+
+    Returns:
+        Path to the transcript file, or None if not found
+    """
+    gemini_dir = Path.home() / ".gemini" / "tmp"
+
+    if not gemini_dir.exists():
+        logger.warning(f"Gemini CLI directory not found: {gemini_dir}")
+        return None
+
+    # Search all project hash directories
+    for project_hash_dir in gemini_dir.iterdir():
+        if project_hash_dir.is_dir():
+            chats_dir = project_hash_dir / "chats"
+            if chats_dir.exists():
+                # Look for the session file - Gemini uses UUID format
+                # Try with common extensions
+                for ext in ["", ".json", ".jsonl"]:
+                    transcript = chats_dir / f"{session_id}{ext}"
+                    if transcript.exists():
+                        return str(transcript)
+
+                # Also check if session_id is a prefix (partial match)
+                for chat_file in chats_dir.iterdir():
+                    if chat_file.is_file() and session_id in chat_file.name:
+                        return str(chat_file)
+
+    logger.warning(f"Gemini transcript not found for session: {session_id}")
     return None

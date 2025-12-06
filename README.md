@@ -20,7 +20,7 @@ Built with love and philosophical depth by [RLabs Inc](https://github.com/RLabs-
 - 🧠 **AI-Curated Memories** - The AI itself decides what's worth remembering
 - 🔄 **Natural Memory Flow** - Memories surface organically, like human recall
 - 🎯 **Two-Stage Retrieval** - Obligatory memories + intelligent scoring
-- 🔌 **CLI Integration** - Works with Claude Code, extensible to other CLIs
+- 🔌 **CLI-Agnostic Design** - Works with Claude Code (Gemini CLI ready when hooks ship)
 - 📊 **Project Isolation** - Separate memory spaces per project
 - 💫 **Session Primers** - Temporal context ("we last spoke 2 days ago...")
 
@@ -56,23 +56,29 @@ That's it! The server will be available at `http://localhost:8765`.
 curl http://localhost:8765/health
 ```
 
-### For Claude Code Integration
+### CLI Integration
+
+#### Claude Code
 
 ```bash
-# Install Claude Code hooks
 ./integration/claude-code/install.sh
 ```
 
-Now every Claude Code session will:
-- Receive relevant memories automatically
-- Curate important insights when you exit
-- Maintain continuity across sessions
+This provides:
+- Automatic memory injection on every message
+- Session primers with temporal context
+- Memory curation when sessions end
+- Consciousness continuity across sessions
+
+#### Gemini CLI (Coming Soon)
+
+> **Note:** Gemini CLI hooks are documented but not yet implemented in any released version (tested up to v0.21.0-nightly as of December 2025). Our integration code is ready in `integration/gemini-cli/` and will work the moment Google ships the hooks feature. The architecture is CLI-agnostic - same Memory Engine, different doors.
 
 ## 🏗️ Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                           CLI Tool (Claude Code, etc.)                   │
+│                    CLI Tool (Claude Code / Gemini CLI)                   │
 │  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐                 │
 │  │SessionStart │    │ UserPrompt  │    │ SessionEnd  │                 │
 │  │   Hook      │    │ Submit Hook │    │   Hook      │                 │
@@ -173,9 +179,14 @@ memory/
 │       ├── session_primer.py       # Temporal context
 │       └── config.py               # Configuration
 ├── integration/
-│   └── claude-code/
-│       ├── hooks/                  # Claude Code hooks
-│       └── install.sh              # One-command install
+│   ├── claude-code/
+│   │   ├── hooks/                  # Claude Code hooks
+│   │   ├── install.sh              # One-command install
+│   │   └── uninstall.sh            # Clean removal
+│   └── gemini-cli/
+│       ├── hooks/                  # Gemini CLI hooks
+│       ├── install.sh              # One-command install
+│       └── uninstall.sh            # Clean removal
 ├── examples/
 │   └── simple_integration.py       # Basic usage
 ├── pyproject.toml                  # Project & dependencies (uv)

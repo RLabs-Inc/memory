@@ -53,39 +53,43 @@ class Curator:
     async def curate_from_session(self,
                                   claude_session_id: str,
                                   trigger_type: Literal['session_end', 'pre_compact', 'context_full'],
-                                  cwd: Optional[str] = None) -> Dict[str, Any]:
+                                  cwd: Optional[str] = None,
+                                  cli_type: Optional[str] = None) -> Dict[str, Any]:
         """
-        Resume a Claude session and ask it to curate memories from the conversation.
-        
+        Resume a CLI session and ask it to curate memories from the conversation.
+
         This is our NEW approach - instead of passing conversation data,
-        we resume the existing session where Claude already has full context.
-        
+        we resume the existing session where the AI already has full context.
+
         Args:
-            claude_session_id: The Claude Code session ID to resume
+            claude_session_id: The CLI session ID to resume
             trigger_type: What triggered this curation
-            cwd: Working directory where Claude Code session lives
-            
+            cwd: Working directory where CLI session lives
+            cli_type: Which CLI to use ("claude-code" or "gemini-cli", default: claude-code)
+
         Returns:
             Dictionary containing:
             - session_summary: Brief summary of the session
             - project_snapshot: Current project state (if applicable)
             - memories: List of curated memories
         """
-        
-        logger.info(f"🎯 NEW APPROACH: Resuming Claude session {claude_session_id} for curation")
-        logger.info(f"💡 Claude will curate from lived experience, not cold transcripts!")
+        cli_type = cli_type or "claude-code"
+
+        logger.info(f"🎯 Resuming {cli_type} session {claude_session_id} for curation")
+        logger.info(f"💡 AI will curate from lived experience, not cold transcripts!")
         if cwd:
             logger.info(f"📂 Working directory: {cwd}")
-        
+
         # Build the curation prompt that will be sent to the resumed session
         curation_prompt = self._build_session_curation_prompt(trigger_type)
-        
+
         try:
-            # Resume the Claude session and ask for curation
-            response_json = await self._query_claude_session_for_curation(
-                claude_session_id, 
-                curation_prompt,
-                cwd=cwd
+            # Resume the CLI session and ask for curation
+            response_json = await self._query_cli_session_for_curation(
+                session_id=claude_session_id,
+                curation_prompt=curation_prompt,
+                cwd=cwd,
+                cli_type=cli_type
             )
             
             # Parse the full response
@@ -287,12 +291,12 @@ Focus on: project context, technical decisions, breakthroughs, personal preferen
     
     def _extract_response_from_cli_output(self, output_json: dict) -> str:
         """
-        Extract Claude's response from CLI output.
-        Handles both one-claude and Claude Code formats.
-        
-        one-claude format:
-            {"response": "..."}
-            
+        Extract AI response from CLI output.
+        Handles multiple CLI formats.
+
+        one-claude / Gemini CLI format:
+            {"response": "...", "stats": {...}}
+
         Claude Code format:
             {"messages": [...], "result": {"content": [{"type": "text", "text": "..."}]}}
             or sometimes:
@@ -342,35 +346,56 @@ Focus on: project context, technical decisions, breakthroughs, personal preferen
         logger.warning(f"Unknown CLI output format, attempting fallback extraction. Type: {type(output_json)}")
         return str(output_json)
     
-    async def _query_claude_session_for_curation(self, claude_session_id: str, curation_prompt: str, cwd: Optional[str] = None) -> str:
-        """Resume a Claude session and ask for memory curation"""
-        
+    async def _query_cli_session_for_curation(self, session_id: str, curation_prompt: str, cwd: Optional[str] = None, cli_type: str = "claude-code") -> str:
+        """Resume a CLI session and ask for memory curation"""
+        from .config import CuratorConfig, get_curator_command
+
         try:
-            logger.info(f"Resuming Claude session {claude_session_id} for curation...")
+            logger.info(f"Resuming {cli_type} session {session_id} for curation...")
             logger.info(f"Curation prompt length: {len(curation_prompt)} characters")
             if cwd:
                 logger.info(f"Working directory: {cwd}")
-            
-            # Resume the session with curation prompt as system prompt
-            cmd = self.config.get_session_resume_command(
-                session_id=claude_session_id,
-                system_prompt=curation_prompt,
-                user_message="Please analyze the conversation above and extract memories according to the instructions."
-            )
+
+            # Create config for the specific CLI type
+            config = CuratorConfig()
+            if cli_type != "claude-code":
+                config.cli_type = cli_type
+                config.curator_command = get_curator_command(cli_type)
+                template = config.TEMPLATES.get(cli_type, config.TEMPLATES['claude-code'])
+                config.session_resume_template = template['session_resume']
+
+            # Resume the session with curation prompt
+            # Note: Gemini CLI doesn't have --append-system-prompt, so we include it in the prompt
+            if cli_type == "gemini-cli":
+                # For Gemini, combine system prompt with user message
+                full_prompt = f"{curation_prompt}\n\nPlease analyze the conversation above and extract memories according to the instructions."
+                cmd = config.get_session_resume_command(
+                    session_id=session_id,
+                    system_prompt="",  # Not used for Gemini
+                    user_message=full_prompt
+                )
+            else:
+                cmd = config.get_session_resume_command(
+                    session_id=session_id,
+                    system_prompt=curation_prompt,
+                    user_message="Please analyze the conversation above and extract memories according to the instructions."
+                )
             
             # Set environment variable to prevent hooks from triggering recursively
             env = os.environ.copy()
             env["MEMORY_CURATOR_ACTIVE"] = "1"
-            
+
+            logger.info(f"🚀 Launching {cli_type} with command: {' '.join(cmd[:3])}...")
+
             # Run subprocess with the env var set and in the correct working directory
             process = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 env=env,  # Pass the environment with our flag
-                cwd=cwd   # Run in the same directory as the Claude Code session
+                cwd=cwd   # Run in the same directory as the CLI session
             )
-            
+
             # Set a reasonable timeout (120 seconds for complex curation)
             try:
                 stdout, stderr = await asyncio.wait_for(
@@ -378,24 +403,24 @@ Focus on: project context, technical decisions, breakthroughs, personal preferen
                     timeout=120.0
                 )
             except asyncio.TimeoutError:
-                logger.error("Claude curator timed out after 120 seconds")
+                logger.error(f"{cli_type} curator timed out after 120 seconds")
                 process.kill()
                 await process.wait()
                 return "[]"
-            
+
             if process.returncode != 0:
-                logger.error(f"Claude CLI failed with code {process.returncode}")
+                logger.error(f"{cli_type} CLI failed with code {process.returncode}")
                 logger.error(f"Stderr: {stderr.decode()}")
                 return "[]"
-            
+
             # Parse the JSON output
             stdout_str = stdout.decode('utf-8').strip()
             logger.debug(f"Raw output length: {len(stdout_str)} characters")
-            
+
             try:
-                # Parse CLI output (handles both one-claude and Claude Code formats)
+                # Parse CLI output (handles Claude Code, one-claude, and Gemini CLI formats)
                 output_json = json.loads(stdout_str)
-                
+
                 # Log raw structure for debugging
                 logger.info(f"📦 Raw CLI output type: {type(output_json)}")
                 if isinstance(output_json, dict):
@@ -406,27 +431,27 @@ Focus on: project context, technical decisions, breakthroughs, personal preferen
                         logger.info(f"📦 First item type: {type(output_json[0])}")
                         if isinstance(output_json[0], dict):
                             logger.info(f"📦 First item keys: {list(output_json[0].keys())}")
-                
-                claude_response = self._extract_response_from_cli_output(output_json)
-                
+
+                ai_response = self._extract_response_from_cli_output(output_json)
+
                 logger.info("=" * 80)
-                logger.info("FULL CLAUDE SESSION CURATOR RESPONSE:")
+                logger.info(f"FULL {cli_type.upper()} SESSION CURATOR RESPONSE:")
                 logger.info("=" * 80)
-                logger.info(claude_response)
+                logger.info(ai_response)
                 logger.info("=" * 80)
-                
+
                 # For session curation, we expect a JSON object, not array
                 # Try to extract JSON object from the response
                 import re
-                json_match = re.search(r'\{.*\}', claude_response, re.DOTALL)
+                json_match = re.search(r'\{.*\}', ai_response, re.DOTALL)
                 if json_match:
                     return json_match.group(0)
-                
+
                 # If no JSON found, return default structure
                 return json.dumps({"session_summary": "", "project_snapshot": {}, "memories": []})
-                
+
             except json.JSONDecodeError as e:
-                logger.error(f"Failed to parse Claude CLI output as JSON: {e}")
+                logger.error(f"Failed to parse {cli_type} CLI output as JSON: {e}")
                 logger.error(f"Output was: {stdout_str[:500]}...")
                 return "[]"
             
