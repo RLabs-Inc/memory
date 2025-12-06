@@ -131,8 +131,15 @@ def main():
         register_session(session_id, project_id)
         
         # Output primer to stdout (will be injected into session)
+        # Use JSON format for reliable injection as system reminder
         if primer:
-            print(primer)
+            output = {
+                "hookSpecificOutput": {
+                    "hookEventName": "SessionStart",
+                    "additionalContext": primer
+                }
+            }
+            print(json.dumps(output))
             
     except Exception:
         # Never crash
