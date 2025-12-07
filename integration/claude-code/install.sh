@@ -120,7 +120,7 @@ hooks_config = {
             "hooks": [
                 {
                     "type": "command",
-                    "command": "python3 ~/.claude/hooks/memory_curate_transcript.py"
+                    "command": "python3 ~/.claude/hooks/memory_curate.py"
                 }
             ]
         }

@@ -95,14 +95,21 @@ class MemoryEngine:
         # Default to claude-code if not specified
         cli_type = cli_type or "claude-code"
 
-        # Check if session has any messages
-        if session_id not in self.session_metadata or self.session_metadata[session_id]['message_count'] == 0:
-            vlog.info(f"No messages in session {session_id}")
+        # For session resume approach, we don't need to track messages ourselves
+        # because Claude Code already has the full context from the session
+        message_count = self.session_metadata.get(session_id, {}).get('message_count', 0)
+
+        # If we have a claude_session_id, we can resume even without tracking
+        # (this enables curation after server restart)
+        if not claude_session_id and message_count == 0:
+            vlog.info(f"No messages in session {session_id} and no CLI session to resume")
             return 0
 
-        message_count = self.session_metadata[session_id]['message_count']
         vlog.info(f"🎯 Running curation checkpoint: {trigger} (CLI: {cli_type})")
-        vlog.info(f"📊 Analyzing {message_count} messages in session")
+        if message_count > 0:
+            vlog.info(f"📊 Tracked {message_count} messages in session")
+        else:
+            vlog.info(f"📊 Resuming CLI session (messages tracked by CLI)")
 
         try:
             # Session-based curation is required

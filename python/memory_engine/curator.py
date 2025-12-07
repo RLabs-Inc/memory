@@ -396,17 +396,9 @@ Focus on: project context, technical decisions, breakthroughs, personal preferen
                 cwd=cwd   # Run in the same directory as the CLI session
             )
 
-            # Set a reasonable timeout (120 seconds for complex curation)
-            try:
-                stdout, stderr = await asyncio.wait_for(
-                    process.communicate(),
-                    timeout=120.0
-                )
-            except asyncio.TimeoutError:
-                logger.error(f"{cli_type} curator timed out after 120 seconds")
-                process.kill()
-                await process.wait()
-                return "[]"
+            # No timeout - let the CLI work as long as it needs
+            # For very long sessions, curation may take several minutes
+            stdout, stderr = await process.communicate()
 
             if process.returncode != 0:
                 logger.error(f"{cli_type} CLI failed with code {process.returncode}")
