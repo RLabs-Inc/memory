@@ -93,11 +93,14 @@ def main():
     """Main hook entry point."""
     if os.getenv("MEMORY_CURATOR_ACTIVE") == "1":
         return
-    
+
     try:
         input_data = json.load(sys.stdin)
         session_id = input_data.get("session_id", "unknown")
-        cwd = input_data.get("cwd", os.getcwd())
+        # CRITICAL: Use CLAUDE_PROJECT_DIR env var for the actual project root
+        # The 'cwd' from stdin is the bash shell's current directory (can change with cd)
+        # CLAUDE_PROJECT_DIR is where Claude Code was actually launched
+        cwd = os.getenv("CLAUDE_PROJECT_DIR") or input_data.get("cwd", os.getcwd())
         project_id = get_project_id(cwd)
         trigger = get_trigger_type(input_data)
         

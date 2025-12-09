@@ -112,7 +112,8 @@ def main():
         
         session_id = input_data.get("session_id", "unknown")
         prompt = input_data.get("prompt", "")
-        cwd = input_data.get("cwd", os.getcwd())
+        # Use CLAUDE_PROJECT_DIR for actual project root (cwd from stdin is bash's current dir)
+        cwd = os.getenv("CLAUDE_PROJECT_DIR") or input_data.get("cwd", os.getcwd())
         
         # Get project ID from directory
         project_id = get_project_id(cwd)

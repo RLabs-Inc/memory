@@ -118,7 +118,8 @@ def main():
         input_data = json.load(sys.stdin)
         
         session_id = input_data.get("session_id", "unknown")
-        cwd = input_data.get("cwd", os.getcwd())
+        # Use CLAUDE_PROJECT_DIR for actual project root (cwd from stdin is bash's current dir)
+        cwd = os.getenv("CLAUDE_PROJECT_DIR") or input_data.get("cwd", os.getcwd())
         source = input_data.get("source", "startup")
         
         # Get project ID
