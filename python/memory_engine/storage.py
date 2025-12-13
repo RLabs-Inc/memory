@@ -443,6 +443,78 @@ class MemoryStorage:
         """, (sessions_delta, memories_delta, time.time(), project_id))
         self.conn.commit()
     
+    def get_stats(self) -> Dict[str, Any]:
+        """Get comprehensive memory system statistics"""
+        import os
+
+        stats = {
+            "total_projects": 0,
+            "total_sessions": 0,
+            "total_curated_memories": 0,
+            "total_session_summaries": 0,
+            "total_project_snapshots": 0,
+            "projects": [],
+            "storage_size_mb": 0.0
+        }
+
+        try:
+            # Count projects
+            cursor = self.conn.execute("SELECT COUNT(*) FROM projects")
+            stats["total_projects"] = cursor.fetchone()[0]
+
+            # Count sessions
+            cursor = self.conn.execute("SELECT COUNT(*) FROM sessions")
+            stats["total_sessions"] = cursor.fetchone()[0]
+
+            # Count curated memories
+            cursor = self.conn.execute("SELECT COUNT(*) FROM curated_memories")
+            stats["total_curated_memories"] = cursor.fetchone()[0]
+
+            # Count session summaries
+            cursor = self.conn.execute("SELECT COUNT(*) FROM session_summaries")
+            stats["total_session_summaries"] = cursor.fetchone()[0]
+
+            # Count project snapshots
+            cursor = self.conn.execute("SELECT COUNT(*) FROM project_snapshots")
+            stats["total_project_snapshots"] = cursor.fetchone()[0]
+
+            # Get per-project stats
+            cursor = self.conn.execute("""
+                SELECT p.id, p.total_sessions, p.total_memories, p.first_session_completed,
+                       (SELECT COUNT(*) FROM curated_memories WHERE project_id = p.id) as actual_memories,
+                       (SELECT COUNT(*) FROM session_summaries WHERE project_id = p.id) as summaries
+                FROM projects p
+                ORDER BY p.last_active DESC
+            """)
+
+            for row in cursor.fetchall():
+                stats["projects"].append({
+                    "id": row[0],
+                    "total_sessions": row[1],
+                    "total_memories": row[4],  # Use actual count from curated_memories
+                    "first_session_completed": bool(row[3]),
+                    "summaries": row[5]
+                })
+
+            # Calculate storage size
+            if os.path.exists(self.db_path):
+                stats["storage_size_mb"] = round(os.path.getsize(self.db_path) / (1024 * 1024), 2)
+
+            # Add ChromaDB stats if available
+            if os.path.exists(self.chroma_path):
+                chroma_size = 0
+                for dirpath, dirnames, filenames in os.walk(self.chroma_path):
+                    for f in filenames:
+                        fp = os.path.join(dirpath, f)
+                        chroma_size += os.path.getsize(fp)
+                stats["chroma_size_mb"] = round(chroma_size / (1024 * 1024), 2)
+                stats["storage_size_mb"] += stats["chroma_size_mb"]
+
+        except Exception as e:
+            logger.error(f"Failed to get stats: {e}")
+
+        return stats
+
     def close(self):
         """Close database connections"""
         if hasattr(self, 'conn'):
