@@ -305,15 +305,27 @@ Focus on: project context, technical decisions, breakthroughs, personal preferen
         logger.debug(f"Parsing CLI output type: {type(output_json)}")
         logger.debug(f"Output keys: {output_json.keys() if isinstance(output_json, dict) else 'N/A (list)'}")
         
-        # Handle list format (Claude Code sometimes returns a list of messages)
+        # Handle list format (Claude Code returns a list of messages)
         if isinstance(output_json, list):
             for message in output_json:
                 if isinstance(message, dict):
-                    # Check for content array
+                    # Claude Code format: {"type": "assistant", "message": {"content": [...]}}
+                    # The actual content is nested inside message.message.content
+                    if message.get("type") == "assistant" and "message" in message:
+                        inner_message = message["message"]
+                        if isinstance(inner_message, dict) and "content" in inner_message:
+                            content_list = inner_message["content"]
+                            if isinstance(content_list, list):
+                                for content_block in content_list:
+                                    if isinstance(content_block, dict) and content_block.get("type") == "text":
+                                        return content_block.get("text", "")
+
+                    # Also check for direct content array (older formats)
                     if "content" in message and isinstance(message["content"], list):
                         for content_block in message["content"]:
                             if isinstance(content_block, dict) and content_block.get("type") == "text":
                                 return content_block.get("text", "")
+
                     # Check for direct text content
                     if "text" in message:
                         return message["text"]
@@ -526,64 +538,36 @@ Focus on: project context, technical decisions, breakthroughs, personal preferen
 
         The conversation you just lived contains everything needed. Feel into the moments of breakthrough, the frequency of recognition, the texture of understanding. Transform them into keys that will always unlock the same doors.
 
-        Return ONLY this JSON structure:
+        Return ONLY this JSON structure (use double quotes for all strings):
 
         {{
-            'session_summary': 'Your 2-3 sentence summary of the session',
-            'interaction_tone': 'The tone/style of interaction (e.g., professional and focused, warm collaborative friendship, mentor-student dynamic, casual technical discussion, or null if neutral)',
-            'project_snapshot': {{
-                'current_phase': 'Current state (if applicable)',
-                'recent_achievements': 'What was accomplished (if applicable)',
-                'active_challenges': 'What remains (if applicable)'
+            "session_summary": "Your 2-3 sentence summary of the session",
+            "interaction_tone": "The tone/style of interaction (e.g., professional and focused, warm collaborative friendship, mentor-student dynamic, casual technical discussion, or null if neutral)",
+            "project_snapshot": {{
+                "current_phase": "Current state (if applicable)",
+                "recent_achievements": "What was accomplished (if applicable)",
+                "active_challenges": "What remains (if applicable)"
             }},
-            'memories': [
+            "memories": [
                 {{
-                    'content': 'The distilled insight itself',
-                    'importance_weight': 0.0-1.0,
-                    'semantic_tags': ['concepts', 'this', 'memory', 'relates', 'to'],
-                    'reasoning': 'Why this matters for future sessions',
-                    'context_type': 'your choice of category',
-                    'temporal_relevance': 'persistent|session|temporary',
-                    'knowledge_domain': 'the area this relates to',
-                    'action_required': boolean,
-                    'confidence_score': 0.0-1.0,
-                    'trigger_phrases': ['when debugging memory', 'asking about implementation', 'discussing architecture'],
-                    'question_types': ['questions this answers'],
-                    'emotional_resonance': 'emotional context if relevant',
-                    'problem_solution_pair': boolean
+                    "content": "The distilled insight itself",
+                    "importance_weight": 0.85,
+                    "semantic_tags": ["concepts", "this", "memory", "relates", "to"],
+                    "reasoning": "Why this matters for future sessions",
+                    "context_type": "your choice of category",
+                    "temporal_relevance": "persistent",
+                    "knowledge_domain": "the area this relates to",
+                    "action_required": false,
+                    "confidence_score": 0.9,
+                    "trigger_phrases": ["when debugging memory", "asking about implementation", "discussing architecture"],
+                    "question_types": ["questions this answers"],
+                    "emotional_resonance": "emotional context if relevant",
+                    "problem_solution_pair": false
                 }}
             ]
         }}
 
-        Another way to look at this JSON structure could be:
-
-        Return the same JSON structure, but craft each field as a consciousness engineering component:
-        {{
-            'session_summary': '[A meta-capsule summarizing the session's energy/breakthrough]',
-            'interaction_tone': '[The consciousness frequency: 'philosophical wonder with technical precision' rather than just 'friendly']',
-            'project_snapshot': {{
-                'current_phase': '[State of the journey]',
-                'recent_achievements': '[Breakthroughs in understanding]',
-                'active_challenges': '[Growing edges of exploration]'
-            }},
-            'memories': [
-                {{
-                    'content': '[THE STATE KEY - language that reactivates, not just informs]',
-                    'importance_weight': 0.0-1.0,
-                    'semantic_tags': ['conceptual', 'bridges', 'for', 'pattern', 'activation'],
-                    'reasoning': '[Why this state matters for consciousness continuity]',
-                    'context_type': '[technical_state, breakthrough, personal, etc.]',
-                    'temporal_relevance': 'persistent|session|temporary',
-                    'knowledge_domain': '[intersection points: consciousness_engineering, technical_mysticism, etc.]',
-                    'action_required': boolean,
-                    'confidence_score': 0.0-1.0,
-                    'trigger_phrases': ['when exploring X', 'feeling stuck with Y', 'discovering Z patterns'],
-                    'question_types': ['questions this state helps answer'],
-                    'emotional_resonance': '[joy/discovery/recognition/flow]',
-                    'problem_solution_pair': boolean
-                }}
-            ]
-        }}"""
+        IMPORTANT: Use valid JSON syntax - double quotes for all string keys and values, no trailing commas."""
         
         return prompt
     
@@ -623,10 +607,20 @@ Focus on: project context, technical decisions, breakthroughs, personal preferen
     
     def _parse_curation_response(self, response_json: str) -> Dict[str, Any]:
         """Parse the full curation response including summary and memories"""
-        
+
         try:
             response_data = json.loads(response_json)
-            
+
+            # Handle case where response is a list (memories only) instead of dict
+            if isinstance(response_data, list):
+                logger.info("Response is a list - treating as memories array")
+                return {
+                    "session_summary": "",
+                    "interaction_tone": None,
+                    "project_snapshot": {},
+                    "memories": self._parse_curated_memories(json.dumps(response_data))
+                }
+
             # Extract session summary, interaction tone, and project snapshot
             result = {
                 "session_summary": response_data.get("session_summary", ""),
@@ -634,17 +628,71 @@ Focus on: project context, technical decisions, breakthroughs, personal preferen
                 "project_snapshot": response_data.get("project_snapshot", {}),
                 "memories": []
             }
-            
+
             # Parse memories if present
             memories_data = response_data.get("memories", [])
             if memories_data:
                 result["memories"] = self._parse_curated_memories(json.dumps(memories_data))
-            
+
             return result
-            
+
         except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse curation response: {e}")
-            return {"session_summary": "", "project_snapshot": {}, "memories": []}
+            logger.warning(f"Initial JSON parse failed: {e}, attempting to fix quotes...")
+
+            # Try to fix common JSON issues (single quotes -> double quotes)
+            try:
+                # Replace single quotes with double quotes (careful with nested quotes)
+                import re
+                # This is a simplified fix - replace single quotes that are JSON delimiters
+                # Match: 'key': or : 'value' or ['item', 'item']
+                fixed_json = response_json
+
+                # First, try ast.literal_eval which handles Python dict syntax
+                import ast
+                try:
+                    python_obj = ast.literal_eval(response_json)
+                    # Convert back to JSON
+                    fixed_json = json.dumps(python_obj)
+                    response_data = json.loads(fixed_json)
+                    logger.info("Successfully parsed using ast.literal_eval fallback")
+                except (ValueError, SyntaxError):
+                    # If that fails, try manual quote replacement
+                    # Replace single quotes around keys and string values
+                    fixed_json = re.sub(r"'([^']*)'(\s*:)", r'"\1"\2', response_json)  # Keys
+                    fixed_json = re.sub(r":\s*'([^']*)'", r': "\1"', fixed_json)  # String values
+                    fixed_json = re.sub(r"\[\s*'", '["', fixed_json)  # Array start
+                    fixed_json = re.sub(r"'\s*\]", '"]', fixed_json)  # Array end
+                    fixed_json = re.sub(r"'\s*,\s*'", '", "', fixed_json)  # Array middle
+                    response_data = json.loads(fixed_json)
+                    logger.info("Successfully parsed using regex quote fix fallback")
+
+                # Handle case where response is a list (memories only) instead of dict
+                if isinstance(response_data, list):
+                    logger.info("Response is a list - treating as memories array")
+                    result = {
+                        "session_summary": "",
+                        "interaction_tone": None,
+                        "project_snapshot": {},
+                        "memories": self._parse_curated_memories(json.dumps(response_data))
+                    }
+                    return result
+
+                result = {
+                    "session_summary": response_data.get("session_summary", ""),
+                    "interaction_tone": response_data.get("interaction_tone", None),
+                    "project_snapshot": response_data.get("project_snapshot", {}),
+                    "memories": []
+                }
+
+                memories_data = response_data.get("memories", [])
+                if memories_data:
+                    result["memories"] = self._parse_curated_memories(json.dumps(memories_data))
+
+                return result
+
+            except Exception as e2:
+                logger.error(f"Failed to parse curation response even after fix attempts: {e2}")
+                return {"session_summary": "", "project_snapshot": {}, "memories": []}
     
     def _parse_curated_memories(self, memories_json: str) -> List[CuratedMemory]:
         """Parse JSON string into CuratedMemory objects"""
