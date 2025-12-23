@@ -1,5 +1,6 @@
 # Check out the new Typescript version 
 🧠 [memory-ts](https://github.com/RLabs-Inc/memory-ts) - same Claude Code hooks API, but a lot of improvements.
+Using the innovative new [fsDB](https://github.com/RLabs-Inc/fsDB), a markdown database built for ai memory systems and other applications where viewing and editing the vector database records using only your text editor makes the difference.
 
 Easy installation:
 
