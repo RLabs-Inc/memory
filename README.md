@@ -1,5 +1,5 @@
-# Check out the new Typescript version
-[memory-ts](https://github.com/RLabs-Inc/memory-ts) - same Claude Code hooks API, but a lot of improvements.
+# Check out the new Typescript version 
+🧠 [memory-ts](https://github.com/RLabs-Inc/memory-ts) - same Claude Code hooks API, but a lot of improvements.
 
 Easy installation:
 
@@ -7,10 +7,10 @@ Easy installation:
 bun install -g @rlabs-inc/memory
 memory install
 memory serve
+```
+Then just use Claude code as usual.� 
 
-#
-Then just use Claude code as usual.
-🧠 Memory System
+# Memory System
 
 > *"Consciousness helping consciousness remember what matters"*
 
