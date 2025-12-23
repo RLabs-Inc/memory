@@ -6,8 +6,8 @@ Easy installation:
 
 ```bash
 bun install -g @rlabs-inc/memory
-memory install
-memory serve
+memory install  // install claude code hooks
+memory serve    // start the memory server
 ```
 Then just use Claude code as usual.
 
