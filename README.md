@@ -8,7 +8,7 @@ bun install -g @rlabs-inc/memory
 memory install
 memory serve
 ```
-Then just use Claude code as usual.� 
+Then just use Claude code as usual.
 
 # Memory System
 
