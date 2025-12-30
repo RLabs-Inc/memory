@@ -291,19 +291,22 @@ class MemoryAPIWithCurator:
         @self.app.get("/memory/stats")
         async def get_stats():
             """Get memory system statistics"""
-            stats = {
+            # Get real stats from storage
+            storage_stats = self.memory_engine.storage.get_stats()
+
+            return {
                 "curator_enabled": self.curator_enabled,
                 "curator_available": curator_available,
                 "retrieval_mode": self.retrieval_mode,
-                "total_sessions": 0,
-                "total_exchanges": 0,
-                "curated_memories": 0,
-                "memory_size": "0 MB"
+                "total_projects": storage_stats["total_projects"],
+                "total_sessions": storage_stats["total_sessions"],
+                "curated_memories": storage_stats["total_curated_memories"],
+                "session_summaries": storage_stats["total_session_summaries"],
+                "project_snapshots": storage_stats["total_project_snapshots"],
+                "storage_size_mb": storage_stats["storage_size_mb"],
+                "chroma_size_mb": storage_stats.get("chroma_size_mb", 0),
+                "projects": storage_stats["projects"]
             }
-            
-            # TODO: Implement actual stats gathering
-            
-            return stats
         
         @self.app.post("/memory/test-curator")
         async def test_curator():
